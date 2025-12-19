@@ -29,7 +29,15 @@ The customer-facing layer. This acts as the "Client" of the Core Engine.
   - Manages tenant data: Workspaces, Users (future), stored configurations.
   - Communicates with Core Orchestrator via HTTP to enqueue jobs.
 
-### 3. Data Flow (Happy Path)
+### 3. FRONTEND (Dashboard)
+The user interface where operators interact with the system.
+
+- **React SPA (TypeScript)**:
+  - Serves as the visual control plane (built with strict TypeScript).
+  - Consumes the `App Console API` to fetch metrics, logs, and manage resources.
+  - Provides real-time view of running jobs and queue status.
+
+### 4. Data Flow (Happy Path)
 1. **User** POSTs a Job to `App Console`.
 2. **User** POSTs a Run Trigger to `App Console`.
 3. **App Console** creates a `Run` record (Status: QUEUED) and POSTs payload to `Core Orchestrator`.
@@ -52,10 +60,16 @@ The customer-facing layer. This acts as the "Client" of the Core Engine.
 ```
 /
 ├── .env                  # Environment Variables (Secrets, Config)
-├── docker-compose.yml    # Infrastructure Definition
+├── docker-compose.yml    # Production Infrastructure Definition
+├── docker-compose.override.yml # Development Overrides (Gitignored)
 ├── Dockerfile.core       # Image definition for Workers & Orchestrator
 ├── Dockerfile.app        # Image definition for App Console
 ├── README.md             # Usage Guide
+│
+├── beehus-web/           # Frontend Application (React/Vite)
+│   ├── src/              # Source Code
+│   ├── public/           # Static Assets
+│   └── package.json      # Dependencies
 │
 ├── app/                  # Application Context (Console)
 │   ├── console/

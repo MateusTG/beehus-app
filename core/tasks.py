@@ -53,10 +53,26 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     run.logs.append(f"[{datetime.now().time()}] {msg}")
                     await run.save()
 
+            # Heartbeat loop
+            async def heartbeat_loop():
+                while True:
+                    try:
+                        await asyncio.sleep(60)
+                        if run:
+                            run.updated_at = datetime.utcnow()
+                            await run.save()
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        logger.error(f"Heartbeat error: {e}")
+
             # Update run status to running
             await repo.save_run_status(run_id, "running")
             await log(f"🔄 Starting scrape: run_id={run_id}, connector={connector_name}")
             
+            # Start heartbeat
+            heartbeat_task = asyncio.create_task(heartbeat_loop())
+
             # Get connector
             try:
                 connector = ConnectorRegistry.get_connector(connector_name)
@@ -64,6 +80,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 msg = f"Connector '{connector_name}' not found"
                 await log(f"❌ {msg}")
                 await repo.save_run_status(run_id, "failed", msg)
+                heartbeat_task.cancel()
                 return {"success": False, "error": str(e)}
             
             # Execute scraping with Selenium
@@ -101,6 +118,12 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 return result.dict() if hasattr(result, 'dict') else {"success": result.success, "data": result.data}
                 
             finally:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                
                 executor.stop()
                 await log("🛑 Session ended")
                 
@@ -110,6 +133,51 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             raise
     
     return asyncio.run(_async_scrape())
+
+
+@celery_app.task(base=DatabaseTask, bind=True)
+def cleanup_stale_runs(self):
+    """
+    Periodic task to cleanup stale/zombie runs.
+    - Fails 'running' jobs with no heartbeat for > 5 mins
+    - Fails 'queued' jobs older than > 1 hour
+    """
+    async def _cleanup():
+        from datetime import datetime, timedelta
+        
+        # 1. Handle Zombie Running Jobs (No heartbeat)
+        zombie_cutoff = datetime.utcnow() - timedelta(minutes=5)
+        zombies = await Run.find(
+            Run.status == "running",
+            Run.updated_at < zombie_cutoff
+        ).to_list()
+        
+        for run in zombies:
+            logger.warning(f"🧟 Found zombie run {run.id}. Marking failed.")
+            run.status = "failed"
+            run.error_summary = "Zombie execution detected (Heartbeat lost)"
+            run.logs.append(f"[{datetime.now().time()}] 💀 System: Marked as zombie (no heartbeat > 5m)")
+            run.finished_at = datetime.utcnow()
+            await run.save()
+            
+        # 2. Handle Stuck Queued Jobs
+        queue_cutoff = datetime.utcnow() - timedelta(hours=1)
+        stuck_queued = await Run.find(
+            Run.status == "queued",
+            Run.created_at < queue_cutoff
+        ).to_list()
+        
+        for run in stuck_queued:
+            logger.warning(f"⏳ Found stuck queued run {run.id}. Marking failed.")
+            run.status = "failed"
+            run.error_summary = "Stuck in queue > 1h"
+            run.logs.append(f"[{datetime.now().time()}] 💀 System: Timeout in queue")
+            run.finished_at = datetime.utcnow()
+            await run.save()
+            
+        return f"Cleaned {len(zombies)} zombies and {len(stuck_queued)} stuck runs"
+    
+    return asyncio.run(_cleanup())
 
 
 @celery_app.task(base=DatabaseTask, bind=True)
@@ -195,84 +263,3 @@ def scheduled_job_runner(self, job_id: str):
         return {"job_id": job_id, "run_id": str(run.id)}
     
     return asyncio.run(_run_scheduled())
-
-
-# ---------------------------------------------------
-# scrap JPMorgan com Selenium Remoto
-# ---------------------------------------------------
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from datetime import datetime
-
-
-
-@celery_app.task(bind=True, max_retries=3, time_limit=1800)
-def login_to_jpmorgan_task(self, user, password, run_id=None):
-    """
-    Task assíncrona para login no JPMorgan seguindo o padrão Beehus.
-    Adaptação para usar SeleniumExecutor e Run model.
-    """
-    
-    async def _async_login():
-        await init_db()
-        _url = "https://secure.chase.com/web/auth/?treatment=jpo#/logon/logon/chaseOnline"
-        
-        # Ensure run exists or create a temp one if not provided (for testing)
-        if run_id:
-            run = await Run.get(run_id)
-        else:
-            run = None # Standalone execution test
-
-        async def log(msg):
-            logger.info(msg)
-            if run:
-                run.logs.append(f"[{datetime.now().time()}] {msg}")
-                await run.save()
-
-        await log(f"🔄 Iniciando login JPMorgan: user={user}")
-
-        executor = SeleniumExecutor()
-        executor.start()
-        driver = executor.driver
-        
-        # Save node information to run
-        if run and executor.node_id:
-            run.node = executor.node_id
-            await run.save()
-
-        try:
-            # 1. Navegação
-            await log(f"NAVIGATE: {_url}")
-            driver.get(_url)
-            
-            # 2. Preenchimento de campos
-            await log("Waiting for user input field...")
-            user_id_field = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "userId-input-field-input"))
-            )
-            user_id_field.send_keys(user)
-            await log("Typed username")
-            
-            password_field = driver.find_element(By.ID, "password-input-field-input")
-            password_field.send_keys(password)
-            await log("Typed password")
-            
-            # Aguarda o tempo solicitado
-            await asyncio.sleep(120)
-
-            if run and run_id:
-                await repo.save_run_status(run_id, "success")
-            
-            await log(f"✅ Login JPMorgan realizado com sucesso: {user}")
-            return {"success": True, "user": user}
-
-        except Exception as e:
-            await log(f"❌ Erro durante o login JPMorgan: {str(e)}")
-            if run and run_id:
-                await repo.save_run_status(run_id, "failed", str(e))
-            raise e
-        finally:
-            executor.stop()
-
-    return asyncio.run(_async_login())

@@ -8,10 +8,12 @@ class JobCreate(BaseModel):
     name: str
     connector: str
     params: Dict[str, Any] = {}
+    schedule: Optional[str] = None  # Cron expression for periodic execution
 
 class JobResponse(JobCreate):
     id: str
     status: JobStatus
+    schedule: Optional[str] = None  # Include in response
     created_at: datetime
     
     class Config:

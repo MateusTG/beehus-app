@@ -12,8 +12,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-adminpass}
-    ports:
-      - "27017:27017"
+    # Ports removed for security (exposed in override only)
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -31,9 +30,7 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+    # Ports removed for security (exposed in override only)
     networks:
       - scrape-net
     healthcheck:
@@ -45,8 +42,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    ports:
-      - "6379:6379"
+    # Ports removed for security (exposed in override only)
     networks:
       - scrape-net
 
@@ -58,8 +54,11 @@ services:
     restart: always
     ports:
       - "4444:4444"
+      # VNC port kept open for now, controlled by password
       - "7900:7900"
     shm_size: 2g
+    environment:
+      - SE_VNC_PASSWORD=${SE_VNC_PASSWORD:-secret}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
       interval: 10s
@@ -74,7 +73,8 @@ services:
   # API for Console/App
   app-console:
     build: .
-    command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000 --reload
+    # Production command (no reload)
+    command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -113,7 +113,7 @@ services:
   # Celery Beat (scheduler)
   celery-beat:
     build: .
-    command: celery -A django_config beat --loglevel=info
+    command: celery -A django_config beat --loglevel=info -S core.celery_scheduler.MongoScheduler
     restart: unless-stopped
     volumes:
       - .:/app

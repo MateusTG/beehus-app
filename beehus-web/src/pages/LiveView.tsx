@@ -4,8 +4,8 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
 interface RunData {
-    id: str;
-    status: str;
+    id: string;
+    status: string;
     logs: string[];
     error_summary?: string;
 }
@@ -17,59 +17,103 @@ export default function LiveView() {
   const [run, setRun] = useState<RunData | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
+  const [logsCollapsed, setLogsCollapsed] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
   // Poll for Run Data
   useEffect(() => {
-    if (!runId) return;
+    if (!runId) {
+        setError("Run ID is missing.");
+        return;
+    }
 
     const fetchRun = async () => {
         try {
-            // Using localhost:8000 directly for now (should vary by env)
-            const response = await axios.get(`http://localhost:8000/runs/${runId}`);
-            setRun(response.data);
+            // Fetch run details
+            const runRes = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/runs/${runId}`);
+            setRun(runRes.data);
+            setLogs(runRes.data.logs || []);
         } catch (err) {
-            console.error("Failed to fetch run", err);
+            console.error("Error fetching run:", err);
             if (axios.isAxiosError(err) && err.response?.status === 401) {
                 logout();
                 navigate('/login');
+            } else {
+                setError("Failed to load run details");
             }
         }
     };
 
     fetchRun(); // Initial fetch
-    const interval = setInterval(fetchRun, 2000); // Poll every 2s
+
+    const interval = setInterval(async () => {
+        try {
+            const pollRes = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/runs/${runId}`);
+            setRun(pollRes.data);
+            setLogs(pollRes.data.logs || []);
+            if (['success', 'failed'].includes(pollRes.data.status)) {
+                clearInterval(interval);
+            }
+        } catch (err) {
+            console.error("Error polling run:", err);
+            if (axios.isAxiosError(err) && err.response?.status === 401) {
+                logout();
+                navigate('/login');
+            }
+            // Don't set global error for polling, just log
+        }
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [runId, navigate, logout]);
 
-  // Auto-scroll logs
+  // Scroll to bottom of logs
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [run?.logs]);
+      if (logsEndRef.current) {
+          logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }
+  }, [logs]);
+
+
+
+  // The original code did not have a Layout component.
+  // For this to be syntactically correct, I'm wrapping the content directly.
+  // If `Layout` is a custom component, it needs to be imported or defined.
+  if (error) return (
+      <div className="p-8 text-red-400">{error}</div>
+  );
+
+  if (!run) return (
+      <div className="p-8 text-slate-400">Loading run details...</div>
+  );
 
   return (
     <div className="flex flex-col h-screen bg-black/50 backdrop-blur-3xl">
-        {/* Toolbar */}
-        <div className="h-16 border-b border-dark-border flex items-center justify-between px-6 bg-dark-bg/80 shrink-0">
+         {/* Header */}
+         <header className="h-16 glass border-b border-dark-border flex items-center justify-between px-6 sticky top-0 z-10">
             <div className="flex items-center space-x-4">
-                <button onClick={() => navigate('/')} className="text-slate-400 hover:text-white transition-colors">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+                <button onClick={() => navigate(-1)} className="text-slate-400 hover:text-white transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                 </button>
                 <div>
-                    <h2 className="font-bold text-white flex items-center">
-                        Job Execution <span className="ml-3 px-2 py-0.5 rounded text-xs bg-brand-500 text-white">LIVE</span>
-                    </h2>
-                    <p className="text-xs text-brand-400 font-mono">Run ID: {runId}</p>
+                    <div className="flex items-center space-x-3">
+                        <h1 className="text-xl font-bold text-white">Job Execution</h1>
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${
+                            run.status === 'running' ? 'bg-brand-500/20 text-brand-400 animate-pulse' : 
+                            run.status === 'success' ? 'bg-green-500/20 text-green-400' :
+                            run.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                            'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                            {run.status === 'running' ? 'LIVE' : run.status}
+                        </span>
+                    </div>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">Run ID: {run.id}</p>
                 </div>
             </div>
             <div className="flex items-center space-x-3">
-                <span className="text-xs text-slate-400 flex items-center">
-                    <span className={`w-2 h-2 rounded-full mr-2 ${run?.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-slate-500'}`}></span>
-                    {run?.status?.toUpperCase() || 'CONNECTING...'}
-                </span>
-                <div className="h-6 w-px bg-white/10 mx-2"></div>
-                {/* VNC Link hint */}
                 <a 
-                    href="http://localhost:7900" 
+                    href={import.meta.env.VITE_VNC_URL || "http://localhost:7900"} 
                     target="_blank" 
                     rel="noreferrer"
                     className="text-xs text-brand-500 hover:underline"
@@ -77,37 +121,69 @@ export default function LiveView() {
                     Open Full VNC
                 </a>
             </div>
-        </div>
+        </header>
 
-        {/* Split View */}
-        <div className="flex-1 flex overflow-hidden">
-            {/* Logs Panel (Left) */}
-            <div className="w-1/3 border-r border-dark-border bg-dark-surface/50 flex flex-col min-w-[300px]">
-                <div className="p-3 bg-dark-surface/80 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-dark-border flex justify-between">
-                    <span>Execution Logs</span>
-                    <span className="text-brand-500">{run?.logs?.length || 0} lines</span>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-xs font-medium text-slate-300">
-                    {run?.logs?.length === 0 && (
-                        <div className="text-slate-500 italic">Waiting for logs...</div>
+        <div className="flex h-[calc(100vh-64px)]">
+            {/* Logs Sidebar */}
+            <div className={`${logsCollapsed ? 'w-12 min-w-[3rem]' : 'w-1/3 min-w-[350px]'} border-r border-dark-border bg-dark-surface/50 flex flex-col transition-all duration-300 relative`}>
+                
+                {/* Toggle Button */}
+                <button 
+                    onClick={() => setLogsCollapsed(!logsCollapsed)}
+                    className="absolute -right-3 top-2 w-6 h-6 bg-dark-surface border border-dark-border rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:border-brand-500 transition-all z-20 shadow-lg"
+                    title={logsCollapsed ? "Expand Logs" : "Collapse Logs"}
+                >
+                     <svg className={`w-3 h-3 transition-transform duration-300 ${logsCollapsed ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+                </button>
+
+                {/* Header */}
+                <div className="p-3 bg-dark-surface/80 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-dark-border flex justify-between items-center h-12">
+                    {!logsCollapsed && (
+                        <>
+                            <span>Execution Logs</span>
+                            <span className="text-brand-500">{logs.length} lines</span>
+                        </>
                     )}
-                    {run?.logs?.map((log, idx) => (
-                        <div key={idx} className="hover:bg-white/5 px-2 py-0.5 rounded border-l-2 border-transparent hover:border-brand-500 break-words whitespace-pre-wrap">
-                            {log}
+                    {logsCollapsed && (
+                        <div className="w-full flex justify-center">
+                            <span className="text-brand-500 text-[10px]">{logs.length}</span>
                         </div>
-                    ))}
-                    <div ref={logsEndRef} />
+                    )}
                 </div>
+
+                {/* Log Content */}
+                {!logsCollapsed && (
+                    <div className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-xs font-medium text-slate-300">
+                        {logs.length === 0 ? (
+                            <div className="text-slate-500 italic text-center mt-10">Waiting for logs...</div>
+                        ) : (
+                            logs.map((log, i) => (
+                                <div key={i} className="hover:bg-white/5 px-2 py-0.5 rounded border-l-2 border-transparent hover:border-brand-500 break-words whitespace-pre-wrap">
+                                    {log}
+                                </div>
+                            ))
+                        )}
+                        <div ref={logsEndRef} />
+                    </div>
+                )}
+                
+                {/* Collapsed Vertical Text */}
+                {logsCollapsed && (
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="transform -rotate-90 whitespace-nowrap text-xs font-bold text-slate-500 uppercase tracking-widest">
+                            Execution Logs
+                        </div>
+                    </div>
+                )}
             </div>
 
-            {/* Browser Viewport (Right) */}
+            {/* Main Content (Selenium Stream) */}
             <div className="flex-1 bg-black relative flex flex-col justify-center items-center p-4">
                  
                  <div className="w-full h-full bg-slate-900 rounded-lg overflow-hidden border border-slate-700 shadow-2xl relative">
                     {/* VNC Iframe */}
-                    {/* Pointing to localhost:7900 (noVNC default port exposed from docker) */}
                     <iframe 
-                        src="http://localhost:7900/?autoconnect=true&resize=scale&password=secret" 
+                        src={`${import.meta.env.VITE_VNC_URL || 'http://localhost:7900'}/?autoconnect=true&resize=scale&password=${import.meta.env.VITE_VNC_PASSWORD || 'secret'}`} 
                         className="w-full h-full border-0"
                         title="Selenium VNC"
                         allowFullScreen

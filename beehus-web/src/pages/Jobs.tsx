@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import Layout from '../components/Layout';
 import axios from 'axios';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import Layout from '../components/Layout';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import { useToast } from '../context/ToastContext';
 
 interface Job {
     id: string;
@@ -10,6 +13,12 @@ interface Job {
     params: Record<string, any>;
     schedule?: string;
     status: string;
+}
+
+interface Workspace {
+    id: string;
+    name: string;
+    description?: string;
 }
 
 // Schedule presets for easy selection
@@ -29,16 +38,36 @@ const SCHEDULE_PRESETS = [
 
 export default function Jobs() {
     const [jobs, setJobs] = useState<Job[]>([]);
+    const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [creating, setCreating] = useState(false);
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const [scheduleType, setScheduleType] = useState('');
     const [customCron, setCustomCron] = useState('');
     const [jsonMode, setJsonMode] = useState(false);
     const [jsonParams, setJsonParams] = useState('{}');
     
-    const [formData, setFormData] = useState({
-        workspace_id: '',
+    // UI State for Delete Modal
+    const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; id: string; name: string }>({ 
+        isOpen: false, id: '', name: '' 
+    });
+    const [deleteAllModal, setDeleteAllModal] = useState(false);
+
+    const { showToast } = useToast();
+
+    // Get workspace specific jobs if workspace_id is present
+    const workspaceId = searchParams.get('workspace');
+    
+    const [formData, setFormData] = useState<{
+        workspace_id: string;
+        name: string;
+        connector: string;
+        params: { username?: string; password?: string; url?: string; selector?: string; [key: string]: any };
+        schedule: string;
+    }>({
+        workspace_id: workspaceId || '',
         name: '',
         connector: 'jpmorgan_login',
         params: { username: '', password: '' },  // Dynamic based on connector
@@ -47,7 +76,7 @@ export default function Jobs() {
 
     const fetchJobs = async () => {
         try {
-            const res = await axios.get('http://localhost:8000/jobs');
+            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs`);
             setJobs(res.data);
         } catch (error) {
             console.error('Failed to fetch jobs:', error);
@@ -56,8 +85,18 @@ export default function Jobs() {
         }
     };
 
+    const fetchWorkspaces = async () => {
+        try {
+            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/workspaces`);
+            setWorkspaces(res.data);
+        } catch (error) {
+            console.error('Failed to fetch workspaces:', error);
+        }
+    };
+
     useEffect(() => {
         fetchJobs();
+        fetchWorkspaces();
     }, []);
 
     // Update params when connector changes
@@ -89,7 +128,7 @@ export default function Jobs() {
             // Determine final schedule value
             const finalSchedule = scheduleType === 'custom' ? customCron : scheduleType;
             
-            await axios.post('http://localhost:8000/jobs', {
+            await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs`, {
                 ...formData,
                 params: finalParams,
                 schedule: finalSchedule || undefined
@@ -118,26 +157,29 @@ export default function Jobs() {
 
     const triggerJob = async (jobId: string) => {
         try {
-            const res = await axios.post(`http://localhost:8000/jobs/${jobId}/run`);
-            alert(`Job triggered! Run ID: ${res.data.id}`);
-            window.location.href = `/live/${res.data.id}`;
+            const res = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs/${jobId}/run`);
+            showToast(`Job triggered! Run ID: ${res.data.id}`, 'success');
+            navigate(`/live/${res.data.id}`);
         } catch (error) {
-            alert('Error triggering job');
+            showToast('Error triggering job', 'error');
             console.error(error);
         }
     };
 
-    const deleteJob = async (jobId: string, jobName: string) => {
-        console.log('Attempting to delete job:', jobId);
-        if (!window.confirm(`Delete job "${jobName}"? This cannot be undone.`)) return;
-        
+    const deleteJob = (jobId: string, jobName: string) => {
+        setDeleteModal({ isOpen: true, id: jobId, name: jobName });
+    };
+
+    const handleConfirmDelete = async () => {
         try {
-            await axios.delete(`http://localhost:8000/jobs/${jobId}`);
-            console.log('Delete successful');
+            await axios.delete(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs/${deleteModal.id}`);
+            showToast('Job deleted successfully', 'success');
             fetchJobs();
         } catch (error) {
-            alert('Error deleting job');
+            showToast('Error deleting job', 'error');
             console.error(error);
+        } finally {
+            setDeleteModal(prev => ({ ...prev, isOpen: false }));
         }
     };
 
@@ -156,17 +198,20 @@ export default function Jobs() {
         return preset ? preset.label : cronExpr;
     };
 
-    const deleteAllJobs = async () => {
-        if (!confirm('DANGER: This will delete ALL jobs in all workspaces. This action cannot be undone.')) return;
-        if (!confirm('Are you absolutely sure you want to prevent all future scrapes?')) return;
-        
+    const deleteAllJobs = () => {
+        setDeleteAllModal(true);
+    };
+
+    const handleConfirmDeleteAll = async () => {
         try {
-            const res = await axios.delete('http://localhost:8000/jobs');
-            alert(res.data.message);
+            const res = await axios.delete(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs`);
+            showToast(res.data.message || 'All jobs deleted', 'success');
             fetchJobs();
         } catch (error) {
-            alert('Error deleting jobs');
+            showToast('Error deleting jobs', 'error');
             console.error(error);
+        } finally {
+            setDeleteAllModal(false);
         }
     };
 
@@ -284,15 +329,20 @@ export default function Jobs() {
                             <form onSubmit={handleCreate} className="space-y-5">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-400 mb-2">Workspace ID</label>
-                                        <input
-                                            type="text"
+                                        <label className="block text-sm font-medium text-slate-400 mb-2">Workspace</label>
+                                        <select
                                             value={formData.workspace_id}
                                             onChange={(e) => setFormData({...formData, workspace_id: e.target.value})}
                                             className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
-                                            placeholder="Enter workspace ID"
                                             required
-                                        />
+                                        >
+                                            <option value="" disabled>Select a workspace</option>
+                                            {workspaces.map(ws => (
+                                                <option key={ws.id} value={ws.id}>
+                                                    {ws.name} ({ws.id.slice(0, 8)}...)
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-400 mb-2">Job Name</label>
@@ -481,7 +531,30 @@ export default function Jobs() {
                         </div>
                     </div>
                 )}
+
             </div>
+
+            {/* Single Delete Modal */}
+            <ConfirmModal
+                isOpen={deleteModal.isOpen}
+                title="Delete Job?"
+                message={`Are you sure you want to delete job "${deleteModal.name}"? This cannot be undone.`}
+                confirmText="Delete Job"
+                isDanger={true}
+                onConfirm={handleConfirmDelete}
+                onCancel={() => setDeleteModal(prev => ({ ...prev, isOpen: false }))}
+            />
+
+            {/* Delete All Modal */}
+            <ConfirmModal
+                isOpen={deleteAllModal}
+                title="Delete ALL Jobs?"
+                message="DANGER: This will delete ALL jobs in ALL workspaces. This action allows you to purge the entire database of scraping tasks. This cannot be undone."
+                confirmText="DELETE EVERYTHING"
+                isDanger={true}
+                onConfirm={handleConfirmDeleteAll}
+                onCancel={() => setDeleteAllModal(false)}
+            />
         </Layout>
     );
 }

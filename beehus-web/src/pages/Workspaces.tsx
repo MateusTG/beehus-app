@@ -1,7 +1,10 @@
-import React, { useEffect, useState } from 'react';
+
+import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import { useToast } from '../context/ToastContext';
 
 interface Workspace {
     id: string;
@@ -13,19 +16,23 @@ interface Workspace {
 export default function Workspaces() {
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [creating, setCreating] = useState(false);
-    const [formData, setFormData] = useState({
-        name: '',
-        description: ''
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [newWorkspaceName, setNewWorkspaceName] = useState('');
+    
+    // UI State for Delete Modal
+    const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; id: string; name: string }>({ 
+        isOpen: false, id: '', name: '' 
     });
+
+    const { showToast } = useToast();
 
     const fetchWorkspaces = async () => {
         try {
-            const res = await axios.get('http://localhost:8000/workspaces');
+            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/workspaces`);
             setWorkspaces(res.data);
         } catch (error) {
             console.error('Failed to fetch workspaces:', error);
+            showToast('Failed to fetch workspaces', 'error');
         } finally {
             setLoading(false);
         }
@@ -35,74 +42,66 @@ export default function Workspaces() {
         fetchWorkspaces();
     }, []);
 
-    const handleCreate = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setCreating(true);
-
+    const createWorkspace = async () => {
+        if (!newWorkspaceName.trim()) {
+            showToast('Workspace name cannot be empty', 'error');
+            return;
+        }
         try {
-            await axios.post('http://localhost:8000/workspaces', formData);
-            setShowModal(false);
-            setFormData({ name: '', description: '' });
+            await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/workspaces`, { name: newWorkspaceName });
+            showToast('Workspace created successfully', 'success');
+            setIsModalOpen(false);
+            setNewWorkspaceName('');
             fetchWorkspaces();
         } catch (error) {
-            alert('Error creating workspace');
+            showToast('Error creating workspace', 'error');
             console.error(error);
-        } finally {
-            setCreating(false);
         }
     };
 
-    const deleteWorkspace = async (id: string, name: string) => {
-        console.log('Attempting to delete workspace:', id, name);
-        if (!window.confirm(`Delete workspace "${name}"? This will also delete all associated jobs.`)) {
-            console.log('Delete cancelled by user');
-            return;
-        }
-        
+    const deleteWorkspace = (id: string, name: string) => {
+        setDeleteModal({ isOpen: true, id, name });
+    };
+
+    const handleConfirmDelete = async () => {
         try {
-            console.log('Sending delete request...');
-            await axios.delete(`http://localhost:8000/workspaces/${id}`);
-            console.log('Delete successful, refreshing...');
+            await axios.delete(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/workspaces/${deleteModal.id}`);
+            showToast('Workspace deleted successfully', 'success');
             fetchWorkspaces();
         } catch (error) {
-            alert('Error deleting workspace (check console)');
+            showToast('Error deleting workspace', 'error');
             console.error('Delete failed:', error);
+        } finally {
+            setDeleteModal(prev => ({ ...prev, isOpen: false }));
         }
     };
 
     const copyToClipboard = async (text: string) => {
-        console.log('Copying to clipboard:', text);
         try {
-            // Try modern API first
             if (navigator.clipboard) {
                 await navigator.clipboard.writeText(text);
-                console.log('Copied via Navigator API');
-                alert('✅ ID copied to clipboard!');
+                showToast('ID copied to clipboard!', 'success');
                 return;
             }
             throw new Error('Navigator API unavailable');
         } catch (err) {
-            console.warn('Navigator API failed, trying fallback:', err);
             // Fallback
             try {
                 const textArea = document.createElement('textarea');
                 textArea.value = text;
-                textArea.style.position = 'fixed'; // Avoid scrolling to bottom
+                textArea.style.position = 'fixed';
                 document.body.appendChild(textArea);
                 textArea.focus();
                 textArea.select();
                 const success = document.execCommand('copy');
                 document.body.removeChild(textArea);
                 if (success) {
-                    console.log('Copied via execCommand');
-                    alert('✅ ID copied to clipboard!');
+                    showToast('ID copied to clipboard!', 'success');
                     return;
                 }
             } catch (fallbackErr) {
                 console.error('Fallback failed:', fallbackErr);
             }
-            
-            // Final fallback
             prompt('Copy this ID:', text);
         }
     };
@@ -116,7 +115,7 @@ export default function Workspaces() {
                         <p className="text-slate-400">Organize your scraping jobs into isolated workspaces</p>
                     </div>
                     <button 
-                        onClick={() => setShowModal(true)}
+                        onClick={() => setIsModalOpen(true)}
                         className="bg-brand-600 hover:bg-brand-500 text-white px-6 py-2.5 rounded-lg font-medium shadow-lg shadow-brand-500/20 transition-all flex items-center space-x-2"
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
@@ -196,56 +195,47 @@ export default function Workspaces() {
                     </div>
                 )}
 
-                {/* Create Modal */}
-                {showModal && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="glass p-8 rounded-xl border border-white/10 w-full max-w-md">
-                            <h3 className="text-xl font-bold text-white mb-6">Create Workspace</h3>
-                            <form onSubmit={handleCreate} className="space-y-5">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">Workspace Name</label>
-                                    <input
-                                        type="text"
-                                        value={formData.name}
-                                        onChange={(e) => setFormData({...formData, name: e.target.value})}
-                                        className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
-                                        placeholder="Production"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">Description (Optional)</label>
-                                    <textarea
-                                        value={formData.description}
-                                        onChange={(e) => setFormData({...formData, description: e.target.value})}
-                                        className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500 resize-none"
-                                        placeholder="Main production environment for live scraping jobs"
-                                        rows={3}
-                                    />
-                                </div>
-                                <div className="flex space-x-3 pt-4 border-t border-white/10">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setShowModal(false);
-                                            setFormData({ name: '', description: '' });
-                                        }}
-                                        className="flex-1 bg-white/5 hover:bg-white/10 text-white px-6 py-2.5 rounded-lg font-medium transition-all"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        disabled={creating}
-                                        className="flex-1 bg-brand-600 hover:bg-brand-500 text-white px-6 py-2.5 rounded-lg font-medium shadow-lg shadow-brand-500/20 transition-all disabled:opacity-50"
-                                    >
-                                        {creating ? 'Creating...' : 'Create'}
-                                    </button>
-                                </div>
-                            </form>
+            {/* Create Modal */}
+            {isModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+                    <div className="glass p-6 rounded-xl border border-white/10 w-full max-w-sm shadow-xl">
+                        <h3 className="text-lg font-bold text-white mb-4">New Workspace</h3>
+                        <input
+                            type="text"
+                            placeholder="Workspace Name"
+                            className="w-full px-4 py-3 bg-dark-surface border border-white/10 rounded-lg text-white focus:ring-2 focus:ring-brand-500 focus:outline-none mb-6 placeholder-slate-500"
+                            value={newWorkspaceName}
+                            onChange={(e) => setNewWorkspaceName(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && createWorkspace()}
+                            autoFocus
+                        />
+                        <div className="flex space-x-3">
+                            <button
+                                onClick={() => setIsModalOpen(false)}
+                                className="flex-1 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={createWorkspace}
+                                className="flex-1 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium shadow-lg shadow-brand-500/20 transition-all"
+                            >
+                                Create
+                            </button>
                         </div>
                     </div>
-                )}
+                </div>
+            )}
+
+            <ConfirmModal
+                isOpen={deleteModal.isOpen}
+                title="Delete Workspace?"
+                message={`Are you sure you want to delete "${deleteModal.name}"? This action cannot be undone.`}
+                confirmText="Delete Workspace"
+                isDanger={true}
+                onConfirm={handleConfirmDelete}
+                onCancel={() => setDeleteModal(prev => ({ ...prev, isOpen: false }))}
+            />
             </div>
         </Layout>
     );

@@ -24,6 +24,8 @@ class SeleniumExecutor:
         # but good practice for consistency.
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument("--window-size=1920,1080")
         # chrome_options.add_argument("--headless") # Optional, helpful for stability
 
         logger.info(f"🔌 Connecting to Selenium Grid at {settings.SELENIUM_REMOTE_URL}...")

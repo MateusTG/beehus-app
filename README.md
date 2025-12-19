@@ -16,10 +16,59 @@
    MONGO_DB_NAME=beehus
    SELENIUM_REMOTE_URL=http://selenium:4444/wd/hub
    ```
-3. Run with Docker Compose:
+   ```
+3. (Optional) For local development features (hot-reload, exposed ports), ensure `docker-compose.override.yml` is present (should be gitignored).
+4. Run with Docker Compose:
    ```bash
    docker compose up --build -d
    ```
+
+### Windows Development Setup
+
+**⚠️ Windows Users**: Due to a known incompatibility between Windows Docker Desktop and Vite's Hot Module Replacement (HMR), the frontend must be run **natively on Windows** for development.
+
+**Setup:**
+1. Start backend services only:
+   ```bash
+   docker compose up -d
+   ```
+   
+2. In a separate terminal, run the frontend natively:
+   ```bash
+   cd beehus-web
+   npm install  # First time only
+   npm run dev
+   ```
+
+3. Access the application at:
+   - **Frontend**: http://localhost:5173
+   - **Backend API**: http://localhost:8000/docs
+
+**Note**: For production deployment, the full Docker Compose setup (including frontend) works correctly. This limitation only affects Windows development.
+
+**Troubleshooting Port 5173 Conflicts:**
+
+If you see `ERR_CONNECTION_RESET` errors even with native frontend:
+
+1. Ensure Docker frontend is fully stopped:
+   ```bash
+   docker compose down
+   docker ps -a --filter "name=frontend"  # Should show nothing
+   docker rm -f beehus-app-frontend-1  # If container still exists
+   ```
+
+2. Restart only backend:
+   ```bash
+   docker compose up -d
+   ```
+
+3. Stop and restart your native frontend:
+   ```bash
+   # In the terminal running npm run dev, press Ctrl+C
+   npm run dev
+   ```
+
+---
 
 ## 🔌 Services & Architecture
 
@@ -29,17 +78,35 @@ Below is a breakdown of each container and its role in the platform:
 |:---|:---|:---|
 | **API** | `app-console` | **REST API (FastAPI)**<br>Main entrypoint. Manages Workspaces, Jobs, and triggers Runs. Dispatches tasks to RabbitMQ. |
 | **Worker** | `celery-worker` | **Task Executor**<br>Consumes tasks from RabbitMQ. Initializes Selenium WebDriver and executes the scraping logic using `core/connectors`. Persists results to MongoDB. |
-| **Scheduler** | `celery-beat` | **Cron Scheduler**<br>Triggers periodic tasks (e.g., `cleanup_old_runs`) based on the schedule defined in `core/celery_app.py`. |
+| **Scheduler** | `celery-beat` | **Cron Scheduler**<br>Triggers periodic tasks using a custom **MongoScheduler**, allowing dynamic schedule management via the database. |
 | **Monitor** | `flower` | **Dashboards**<br>Web UI for monitoring Celery tasks, worker health, and queue statistics. |
 | **Browser** | `selenium` | **Selenium Standalone**<br>Runs Chrome/Firefox browsers in a headless environment. The worker connects here to drive the browser remotely. |
 | **Broker** | `rabbitmq` | **Message Broker**<br>Handles communication between API and Workers. Stores task queues (`default`, `celery`). |
 | **DB** | `mongo` | **Database (NoSQL)**<br>Stores all application data: job configurations, run status, and scraped payloads. |
 | **Cache** | `redis` | **Cache & Result Backend**<br>Used by Celery for result storage and coordination. |
+| **Frontend** | `frontend` | **React SPA**<br>Modern dashboard for managing workspaces, jobs, and monitoring runs. Built with Vite, React, and Tailwind. |
 
-### 🛠 Usage Ports
+### 🔐 Environment Variables
+
+### Frontend (`.env` or Docker env)
+| Variable | Description | Default |
+|:---|:---|:---|
+| `VITE_API_URL` | URL of the Backend API (accessible from browser) | `http://localhost:8000` |
+| `VITE_VNC_URL` | URL of the Selenium VNC Server (accessible from browser) | `http://localhost:7900` |
+| `VITE_VNC_PASSWORD` | Password for VNC connection (must match `SE_VNC_PASSWORD`) | `secret` |
+
+### Backend (`.env`)
+| Variable | Description | Default |
+|:---|:---|:---|
+| `MONGO_DB_NAME` | Name of the MongoDB database | `beehus` |
+| `SE_VNC_PASSWORD` | Password for Selenium VNC server | `secret` |
+| `SELENIUM_REMOTE_URL` | Internal URL for Celery to talk to Selenium | `http://selenium:4444/wd/hub` |
+
+## 🛠 Usage Ports
 
 | Service | Address (Host) |
 |:---|:---|
+| **Frontend Dashboard** | [http://localhost:5173](http://localhost:5173) |
 | **API Documentation** | [http://localhost:8000/docs](http://localhost:8000/docs) |
 | **Flower (Task Monitor)** | [http://localhost:5555](http://localhost:5555) |
 | **Selenium Grid UI** | [http://localhost:4444](http://localhost:4444) |
@@ -47,7 +114,14 @@ Below is a breakdown of each container and its role in the platform:
 
 ## 🛠 Usage
 
-### 1. Monitor Tasks (Flower)
+### 1. Access the Dashboard (Frontend)
+Access [http://localhost:5173](http://localhost:5173) to:
+- **Monitor Live Executions:** View active and queued runs with real-time status updates.
+- **Manage Jobs/Workspaces:** Create and configure scraping jobs.
+- **Execution History:** View detailed logs of past runs via the "Runs" page.
+- **Collapsible Sidebar:** Toggle the sidebar to maximize screen real estate.
+
+### 2. Monitor Tasks (Flower)
 Access [http://localhost:5555](http://localhost:5555) to see:
 - Active / Processed Tasks
 - Worker Health
@@ -69,7 +143,7 @@ Trigger a scrape via **App Console** Swagger UI ([http://localhost:8000/docs](ht
 The run will be queued in RabbitMQ, picked up by `celery-worker`, and executed on `selenium`.
 id **Gmail Refresh Token** and Client credentials.
 
-### 2. Configure OTP
+### 4. Configure OTP
 ```bash
 # A. Create Workspace
 curl -X POST http://localhost:8000/workspaces \
@@ -100,7 +174,7 @@ curl -X POST http://localhost:8000/workspaces/WORKSPACE_UUID/otp-rules \
      }'
 ```
 
-### 3. Run OTP Scrape
+### 5. Run OTP Scrape
 Use the `example_otp` connector which simulates asking for OTP.
 
 ```bash
@@ -118,7 +192,7 @@ curl -X POST "http://localhost:8000/jobs" \
 curl -X POST "http://localhost:8000/jobs/{job_id}/run"
 ```
 
-### 4. Verify Execution
+### 6. Verify Execution
 1. The **Core Worker** will log `Published OTP Request... Waiting...`.
 2. The **Inbox Worker** will start polling Gmail.
 3. **Action:** Send an email to the configured address with subject "Code" and body containing "123456" (or similar 6 digits).

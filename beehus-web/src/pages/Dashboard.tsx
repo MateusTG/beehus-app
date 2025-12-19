@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
@@ -24,18 +24,17 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'running' | 'queued'>('all');
   
   // Modal state
-  const [showModal, setShowModal] = useState(false);
-  const [credentials, setCredentials] = useState({ user: '', password: '' });
-  const [testLoading, setTestLoading] = useState(false);
+
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [statsRes, runsRes] = await Promise.all([
-          axios.get('http://localhost:8000/dashboard/stats'),
-          axios.get('http://localhost:8000/dashboard/recent-runs?limit=5')
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/dashboard/stats`),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/dashboard/recent-runs?limit=5`)
         ]);
         setStats(statsRes.data);
         setRecentRuns(runsRes.data);
@@ -51,28 +50,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleTestSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTestLoading(true);
-    
-    try {
-      const res = await axios.post('http://localhost:8000/test/jpmorgan', null, {
-        params: {
-          user: credentials.user,
-          password: credentials.password
-        }
-      });
-      setShowModal(false);
-      setCredentials({ user: '', password: '' });
-      alert(`Test Started! Run ID: ${res.data.run_id}`);
-      window.location.href = `/live/${res.data.run_id}`;
-    } catch (e) {
-      alert('Error triggering test');
-      console.error(e);
-    } finally {
-      setTestLoading(false);
-    }
-  };
+
 
   const getStatusBadge = (status: string) => {
     const badges = {
@@ -92,74 +70,7 @@ export default function Dashboard() {
                     <h2 className="text-2xl font-bold text-white">Dashboard Overview</h2>
                     <p className="text-slate-400">System health and recent activities</p>
                 </div>
-                <button className="bg-brand-600 hover:bg-brand-500 text-white px-6 py-2.5 rounded-lg font-medium shadow-lg shadow-brand-500/20 transition-all flex items-center space-x-2">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-                    <span>New Job</span>
-                </button>
             </header>
-
-            {/* Test Actions */}
-            <div className="flex space-x-4">
-                <button 
-                    onClick={() => setShowModal(true)}
-                    className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2"
-                >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    <span>Test JPMorgan Login</span>
-                </button>
-            </div>
-
-            {/* Modal */}
-            {showModal && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="glass p-8 rounded-xl border border-white/10 w-full max-w-md">
-                        <h3 className="text-xl font-bold text-white mb-4">JPMorgan Test Credentials</h3>
-                        <form onSubmit={handleTestSubmit} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-2">Username</label>
-                                <input
-                                    type="text"
-                                    value={credentials.user}
-                                    onChange={(e) => setCredentials({...credentials, user: e.target.value})}
-                                    className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
-                                    placeholder="Enter username"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-2">Password</label>
-                                <input
-                                    type="password"
-                                    value={credentials.password}
-                                    onChange={(e) => setCredentials({...credentials, password: e.target.value})}
-                                    className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
-                                    placeholder="Enter password"
-                                    required
-                                />
-                            </div>
-                            <div className="flex space-x-3 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowModal(false);
-                                        setCredentials({ user: '', password: '' });
-                                    }}
-                                    className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 px-4 py-2.5 rounded-lg font-medium transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={testLoading}
-                                    className="flex-1 bg-brand-600 hover:bg-brand-500 text-white px-4 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {testLoading ? 'Starting...' : 'Start Test'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
 
             {/* Stats Grid */}
             {loading ? (
@@ -197,7 +108,26 @@ export default function Dashboard() {
             {/* Recent Runs Table */}
             <div className="glass rounded-xl overflow-hidden border border-white/5">
                 <div className="p-6 border-b border-white/5 flex justify-between items-center">
-                    <h3 className="font-semibold text-lg text-white">Live Executions</h3>
+                    <div className="flex items-center space-x-4">
+                        <h3 className="font-semibold text-lg text-white">Live Executions</h3>
+                        <div className="flex bg-white/5 rounded-lg p-1 space-x-1">
+                            {/* Filter Buttons */}
+                            {(['all', 'running', 'queued'] as const).map((status) => (
+                                <button
+                                    key={status}
+                                    onClick={() => setFilterStatus(status)}
+                                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                                        filterStatus === status 
+                                            ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/20' 
+                                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                    }`}
+                                >
+                                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                                    {status === 'all' ? '' : (status === 'running' ? ' (Active)' : '')}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                     <Link to="/runs" className="text-sm text-brand-400 hover:text-brand-300">View All</Link>
                 </div>
                 <table className="w-full text-left">
@@ -211,14 +141,20 @@ export default function Dashboard() {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 text-sm">
-                        {recentRuns.length === 0 ? (
+                        {recentRuns
+                            .filter(run => filterStatus === 'all' || run.status === filterStatus)
+                            .length === 0 ? (
                             <tr>
                                 <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
-                                    No recent runs. Click "Test JPMorgan Login" to start one!
+                                    {filterStatus === 'all' 
+                                        ? "No recent runs." 
+                                        : `No ${filterStatus} runs found.`}
                                 </td>
                             </tr>
                         ) : (
-                            recentRuns.map((run) => (
+                            recentRuns
+                                .filter(run => filterStatus === 'all' || run.status === filterStatus)
+                                .map((run) => (
                                 <tr key={run.run_id} className="hover:bg-white/5 transition-colors">
                                     <td className="px-6 py-4 font-mono text-slate-300">#{run.run_id.slice(0, 8)}</td>
                                     <td className="px-6 py-4 text-white">{run.connector}</td>

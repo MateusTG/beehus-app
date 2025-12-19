@@ -24,14 +24,19 @@ The platform is designed to be cloud-agnostic and container-native.
 - **Selenium WebDriver**: Browser automation interface.
 - **Selenium Standalone Chrome**: Official Docker image providing a headless Chrome instance manageable via Remote WebDriver.
 
+### Frontend Dashboard
+- **React 19**: UI Library for building the interactive dashboard.
+- **TypeScript**: Strictly typed codebase for reliability and maintainability.
+- **Vite**: Build tool and development server for fast HMR.
+- **Tailwind CSS 4**: Utility-first CSS framework for styling.
+- **Axios**: HTTP client for communicating with the App Console API.
+- **React Router v7**: For client-side routing.
+
 ## Data Storage
 
-- **PostgreSQL (15-alpine)**:
-  - Stores relational data: Workspaces, Jobs, Runs, Inbox Integrations.
-  - Ensures strong consistency for state management.
 - **MongoDB (6-jammy)**:
-  - Stores unstructured/semi-structured data: Raw scraping payloads (HTML/JSON dumps), Evidence metadata.
-  - Ideal for high-volume write operations of raw data.
+  - **Primary Database**: Stores all application data including Workspaces, Jobs, Runs, and scraped payloads.
+  - Flexible schema allows for storing varied scraping results (HTML/JSON dumps).
 - **Redis (7-alpine)**:
   - Used for ephemeral state: Distributed Locks (future use), Rate Limiting, and **OTP Synchronization** (passing codes between Inbox Worker and Scraper Worker).
 

@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # Re-expose ports for local development/debugging
+  mongo:
+    ports:
+      - "27017:27017"
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  # Enable reload for local development
+  app-console:
+    command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Disable frontend - run natively on Windows instead
+  frontend:
+    profiles:
+      - disabled

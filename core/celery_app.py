@@ -10,7 +10,24 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(['core'])
 
 # Celery Beat configuration
-app.conf.beat_schedule_filename = '/app/celerybeat-schedule'
+# Static System Tasks
+from celery.schedules import crontab
+
+app.conf.beat_schedule = {
+    'cleanup-stale-runs': {
+        'task': 'core.tasks.cleanup_stale_runs',
+        'schedule': 300.0,  # Run every 5 minutes
+        'options': {'queue': 'celery'} # Run on default queue
+    },
+    'sync-mongo-schedule': {
+         # Force sync every minute (backup for custom scheduler internal loop)
+         # actually custom scheduler does this internally, but explicit task is fine too if we needed it.
+         # For now, just cleanup is enough.
+         'task': 'core.tasks.cleanup_old_runs_task',
+         'schedule': crontab(hour=0, minute=0), # Daily midnight
+         'args': (30,) # Keep 30 days
+    }
+}
 
 @app.task(bind=True)
 def debug_task(self):
@@ -18,30 +35,4 @@ def debug_task(self):
     print(f'Request: {self.request!r}')
     return 'Debug task completed'
 
-# Dynamic Beat Schedule Loader
-@app.on_after_configure.connect
-def setup_periodic_tasks(sender, **kwargs):
-    """
-    Load periodic tasks from MongoDB on Celery Beat startup.
-    Runs every 60 seconds to sync new jobs.
-    """
-    from core.beat_schedule import get_beat_schedule
-    
-    # Reload schedule every minute to pick up new jobs
-    sender.add_periodic_task(60.0, sync_beat_schedule.s(), name='sync-beat-schedule')
-    
-    # Load initial schedule
-    schedule = get_beat_schedule()
-    for name, config in schedule.items():
-        sender.add_periodic_task(
-            config['schedule'],
-            sender.tasks[config['task']].s(*config['args']),
-            name=name
-        )
 
-@app.task
-def sync_beat_schedule():
-    """Sync schedule from MongoDB (called every minute)"""
-    from core.beat_schedule import get_beat_schedule
-    schedule = get_beat_schedule()
-    return f"Synced {len(schedule)} scheduled jobs"

@@ -10,7 +10,7 @@ interface ToastProps {
 
 export const Toast: React.FC<ToastProps> = ({ message, type, onClose }) => {
     useEffect(() => {
-        const timer = setTimeout(onClose, 5000); // 5 seconds
+        const timer = setTimeout(onClose, 5000);
         return () => clearTimeout(timer);
     }, [onClose]);
 
@@ -35,8 +35,8 @@ export const Toast: React.FC<ToastProps> = ({ message, type, onClose }) => {
                     {icons[type]}
                 </svg>
             </div>
-            <p className="font-medium text-sm mr-4">{message}</p>
-            <button onClick={onClose} className="opacity-50 hover:opacity-100 transition-opacity ml-auto">
+            <p className="font-medium text-sm mr-4 text-slate-200">{message}</p>
+            <button onClick={onClose} className="opacity-50 hover:opacity-100 transition-opacity ml-auto text-slate-400 hover:text-white">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
         </div>

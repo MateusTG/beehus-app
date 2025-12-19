@@ -21,3 +21,10 @@ from core.connectors.otp_example import OtpExampleConnector
 # Register built-ins
 ConnectorRegistry.register(ExampleConnector)
 ConnectorRegistry.register(OtpExampleConnector)
+
+# Register new connectors
+from core.connectors.jpmorgan import JPMorganConnector
+from core.connectors.generic import GenericScraperConnector
+
+ConnectorRegistry.register(JPMorganConnector)
+ConnectorRegistry.register(GenericScraperConnector)
