@@ -132,7 +132,14 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             await repo.save_run_status(run_id, "failed", str(e))
             raise
     
-    return asyncio.run(_async_scrape())
+    # Use existing event loop or create new one if needed
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(_async_scrape())
 
 
 @celery_app.task(base=DatabaseTask, bind=True)

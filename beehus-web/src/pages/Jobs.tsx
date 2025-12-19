@@ -24,6 +24,7 @@ interface Workspace {
 // Schedule presets for easy selection
 const SCHEDULE_PRESETS = [
     { label: 'No schedule (manual only)', value: '' },
+    { label: 'Every 3 minutes', value: '*/3 * * * *' },
     { label: 'Every 5 minutes', value: '*/5 * * * *' },
     { label: 'Every 15 minutes', value: '*/15 * * * *' },
     { label: 'Every 30 minutes', value: '*/30 * * * *' },
@@ -125,8 +126,12 @@ export default function Jobs() {
                 }
             }
             
-            // Determine final schedule value
-            const finalSchedule = scheduleType === 'custom' ? customCron : scheduleType;
+            // Determine final schedule value and normalize (remove extra spaces)
+        let finalSchedule = scheduleType === 'custom' ? customCron : scheduleType;
+        if (finalSchedule) {
+            // Normalize: remove extra spaces between cron parts
+            finalSchedule = finalSchedule.split(/\s+/).filter(p => p).join(' ');
+        }
             
             await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs`, {
                 ...formData,
