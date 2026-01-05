@@ -7,6 +7,7 @@ class JobCreate(BaseModel):
     workspace_id: str
     name: str
     connector: str
+    credential_id: Optional[str] = None
     params: Dict[str, Any] = {}
     schedule: Optional[str] = None  # Cron expression for periodic execution
 

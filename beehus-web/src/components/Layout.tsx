@@ -47,6 +47,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 {!isCollapsed && <span>Runs</span>}
             </Link>
+          <Link to="/credentials" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/credentials')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Credential Vault" : ""}>
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+            {!isCollapsed && <span>Credentials</span>}
+          </Link>
         </nav>
         
         <div className="p-4 border-t border-dark-border/50 overflow-hidden">

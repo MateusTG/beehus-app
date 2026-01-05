@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
+import { useToast } from '../context/ToastContext';
 
 interface Run {
     run_id: string;
@@ -15,21 +16,95 @@ interface Run {
 export default function Runs() {
     const [runs, setRuns] = useState<Run[]>([]);
     const [loading, setLoading] = useState(true);
+    const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
+    const { showToast } = useToast();
 
     useEffect(() => {
+        let isMounted = true;
+        let ws: WebSocket | null = null;
+        let retryCount = 0;
+        const maxRetries = 5;
+
+        // Fetch initial state
         const fetchRuns = async () => {
             try {
-                // Fetching all runs (backend defaults to limit 100 usually, or we can specify)
                 const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/dashboard/recent-runs?limit=100`);
-                setRuns(res.data);
+                if (isMounted) {
+                    setRuns(res.data);
+                    setLoading(false);
+                }
             } catch (error) {
                 console.error('Failed to fetch runs:', error);
-            } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         };
 
+        const connectWebSocket = () => {
+            const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace('http', 'ws') + '/ws/runs';
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('✅ Connected to Real-time Run Updates');
+                retryCount = 0; // Reset retries on success
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    // Update state if run exists
+                    setRuns(prevRuns => {
+                        return prevRuns.map(run => {
+                           if (run.run_id === data.run_id) {
+                               return { 
+                                   ...run, 
+                                   status: data.status,
+                                   // Update node if provided
+                                   ...(data.node && { node: data.node })
+                               };
+                           }
+                           
+                           // If it's a new run creation event (not yet in list), we could add it
+                           // For now, let's just update existing ones to be safe
+                           return run;
+                        });
+                    });
+                } catch (e) {
+                    console.error('Failed to parse WS message:', e);
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('🔴 WebSocket Disconnected');
+                // Simple exponential backoff for reconnection
+                if (isMounted && retryCount < maxRetries) {
+                    const timeout = Math.min(1000 * (2 ** retryCount), 10000);
+                    setTimeout(() => {
+                        console.log(`♻️ Reconnecting in ${timeout}ms...`);
+                        retryCount++;
+                        connectWebSocket();
+                    }, timeout);
+                }
+            };
+
+            ws.onerror = (err) => {
+                console.error('WebSocket Error:', err);
+                ws?.close();
+            };
+        };
+
         fetchRuns();
+        connectWebSocket();
+
+        return () => {
+            isMounted = false;
+            // Clean close
+            if (ws) {
+                ws.onclose = null; // Prevent reconnection attempt on unmount
+                ws.close();
+            }
+        };
     }, []);
 
     const getStatusBadge = (status: string) => {
@@ -40,6 +115,29 @@ export default function Runs() {
             queued: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
         };
         return badges[status as keyof typeof badges] || badges.queued;
+    };
+
+    const handleStop = async (runId: string) => {
+        console.log('handleStop called for runId:', runId);
+        if (!confirm('Are you sure you want to stop this run?')) return;
+        
+        setStoppingRunId(runId);
+        try {
+            await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/runs/${runId}/stop`);
+            showToast('Run stopped successfully', 'success');
+            
+            // Update the run status in the list
+            setRuns(runs.map(run => 
+                run.run_id === runId 
+                    ? { ...run, status: 'failed' } 
+                    : run
+            ));
+        } catch (error) {
+            console.error('Failed to stop run:', error);
+            showToast('Failed to stop run', 'error');
+        } finally {
+            setStoppingRunId(null);
+        }
     };
 
     return (
@@ -58,7 +156,7 @@ export default function Runs() {
                                 <th className="px-6 py-4">Connector</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Node</th>
-                                <th className="px-6 py-4">Action</th>
+                                <th className="px-6 py-4">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 text-sm">
@@ -83,10 +181,22 @@ export default function Runs() {
                                         </td>
                                         <td className="px-6 py-4 text-slate-400">{run.node}</td>
                                         <td className="px-6 py-4">
-                                            <Link to={`/live/${run.run_id}`} className="text-brand-400 hover:text-brand-300 font-medium flex items-center">
-                                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                                Watch
-                                            </Link>
+                                            <div className="flex items-center gap-2">
+                                                <Link to={`/live/${run.run_id}`} className="text-brand-400 hover:text-brand-300 font-medium flex items-center">
+                                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                                    Watch
+                                                </Link>
+                                                {(run.status === 'running' || run.status === 'queued') && (
+                                                    <button
+                                                        onClick={() => handleStop(run.run_id)}
+                                                        disabled={stoppingRunId === run.run_id}
+                                                        className="text-red-400 hover:text-red-300 font-medium flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path></svg>
+                                                        {stoppingRunId === run.run_id ? 'Stopping...' : 'Stop'}
+                                                    </button>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))

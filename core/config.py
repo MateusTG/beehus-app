@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Selenium
     SELENIUM_REMOTE_URL: str = "http://selenium:4444/wd/hub"  # Selenium Standalone
 
+    # Security
+    DATABASE_ENCRYPTION_KEY: str = "qQkYhPB2wmkqTLcJxmiiKjYHrnJpDVRtMne4cxd8SpM="
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

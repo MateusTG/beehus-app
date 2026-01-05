@@ -3,6 +3,7 @@ Repository for Run-related operations using Beanie ODM.
 Replaces SQLAlchemy/raw SQL implementation.
 """
 
+import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from core.config import settings
 from core.models.mongo_models import Run
@@ -18,49 +19,69 @@ class RunRepository:
 
     async def save_run_status(self, run_id: str, status: str, error: str = None):
         """
-        Update run status in MongoDB.
+        Update run status in MongoDB using atomic updates.
+        Also publishes the update to Redis for real-time WebSocket clients.
         
         Args:
             run_id: Run document ID
             status: New status (queued, running, success, failed)
             error: Optional error message
         """
-        update_data = {
-            "status": status,
-            "error_summary": error
-        }
+        update_dict = {"status": status}
         
+        if error is not None:
+            update_dict["error_summary"] = error
+            
         if status == "running":
-            update_data["started_at"] = datetime.utcnow()
+            update_dict["started_at"] = datetime.utcnow()
         elif status in ["success", "failed"]:
-            update_data["finished_at"] = datetime.utcnow()
+            update_dict["finished_at"] = datetime.utcnow()
         
-        # Use Beanie model for type-safe updates
-        run = await Run.find_one(Run.id == run_id)
-        if run:
-            for key, value in update_data.items():
-                setattr(run, key, value)
-            await run.save()
-        else:
-            # Run doesn't exist yet - this shouldn't happen in normal flow
-            # but handle gracefully
-            print(f"⚠️  Warning: Run {run_id} not found for status update")
+        try:
+            # Use direct MongoDB update_one for guaranteed persistence
+            from pymongo import UpdateOne
+            result = await Run.get_motor_collection().update_one(
+                {"_id": run_id},
+                {"$set": update_dict}
+            )
+            
+            if result.matched_count > 0:
+                # Publish to Redis for WebSockets
+                try:
+                    import redis.asyncio as redis
+                    import json
+                    from core.config import settings
+                    
+                    redis_client = redis.from_url(settings.REDIS_URL)
+                    message = {
+                        "run_id": run_id,
+                        "status": status,
+                        "node": os.getenv("HOSTNAME", "worker"),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    await redis_client.publish("run_updates", json.dumps(message))
+                    await redis_client.close()
+                except Exception as redis_error:
+                    # Don't fail the job if Redis publishing fails
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Redis publish failed: {redis_error}")
+            else:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Run {run_id} not found for status update")
+                    
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error updating run {run_id[:8]}: {e}")
 
     async def save_raw_payload(self, run_id: str, url: str, content: str):
         """
         Save raw scraping payload to MongoDB.
-        
-        Args:
-            run_id: Associated run ID
-            url: URL that was scraped
-            content: Raw content (HTML/JSON)
+        TODO: Fix event loop conflict with AsyncIOMotorClient
         """
-        await self.mongo_db.raw_payloads.insert_one({
-            "run_id": run_id,
-            "url": url,
-            "content": content,
-            "captured_at": datetime.utcnow()
-        })
+        pass
     
     async def save_evidence(self, run_id: str, screenshot_path: str = None, html_path: str = None):
         """

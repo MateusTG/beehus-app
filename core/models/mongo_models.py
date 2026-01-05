@@ -69,12 +69,28 @@ class OtpRule(Document):
         name = "otp_rules"
 
 
+class Credential(Document):
+    """Secure credential storage for scraping"""
+    id: str = Field(default_factory=generate_uuid)
+    workspace_id: Indexed(str)
+    label: str
+    username: str
+    encrypted_password: str
+    metadata: dict = {}
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Settings:
+        name = "credentials"
+
+
 class Job(Document):
     """Scraping job configuration"""
     id: str = Field(default_factory=generate_uuid)
     workspace_id: Indexed(str)
     name: str
     connector: Indexed(str)  # Connector name (e.g., "example", "linkedin")
+    credential_id: Optional[str] = None  # Reference to Credential document
     params: dict = {}  # Job-specific parameters
     schedule: Optional[str] = None  # Cron expression for periodic execution
     status: str = "active"  # active, paused, deleted
@@ -88,8 +104,10 @@ class Run(Document):
     """Individual execution of a job"""
     id: str = Field(default_factory=generate_uuid)
     job_id: Indexed(str)
+    connector: Optional[str] = None  # Connector name for display
     status: str = "queued"  # queued, running, success, failed
     attempt: int = 1
+    celery_task_id: Optional[str] = None  # For task cancellation
     error_summary: Optional[str] = None
     logs: List[str] = []
     started_at: Optional[datetime] = None
@@ -117,5 +135,5 @@ class OtpAudit(Document):
         name = "otp_audit"
 
 MONGO_MODELS = [
-    User, Workspace, Job, Run, InboxIntegration, OtpRule, OtpAudit
+    User, Workspace, Job, Run, InboxIntegration, OtpRule, OtpAudit, Credential
 ]

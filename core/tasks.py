@@ -8,8 +8,9 @@ from django_config import celery_app
 from core.worker.executor import SeleniumExecutor
 from core.connectors.registry import ConnectorRegistry
 from core.repositories import repo
-from core.models.mongo_models import Job, Run
+from core.models.mongo_models import Job, Run, Credential
 from core.db import init_db
+from core.security import decrypt_value
 import asyncio
 import logging
 
@@ -46,6 +47,24 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             if not run:
                  logger.error(f"Run {run_id} not found")
                  return
+            
+            # Fetch job to check for credentials
+            job = await Job.get(job_id)
+            
+            # Prepare execution params
+            execution_params = params.copy()
+            
+            # Resolve and inject credentials if available
+            if job and job.credential_id:
+                credential = await Credential.get(job.credential_id)
+                if credential:
+                    execution_params["username"] = credential.username
+                    decrypted_password = decrypt_value(credential.encrypted_password)
+                    execution_params["password"] = decrypted_password
+                    if not decrypted_password:
+                        logger.error(f"Credential decryption failed for job {job_id}")
+                else:
+                    logger.warning(f"Credential {job.credential_id} not found for job {job_id}")
             
             async def log(msg):
                 logger.info(msg)
@@ -91,7 +110,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             try:
                 # Add context to params
                 params_with_context = {
-                    **params,
+                    **execution_params,
                     "run_id": run_id,
                     "job_id": job_id,
                     "workspace_id": workspace_id
@@ -253,7 +272,7 @@ def scheduled_job_runner(self, job_id: str):
             return
         
         # Create run
-        run = Run(job_id=job_id, status="queued", logs=["[System] Scheduled execution"])
+        run = Run(job_id=job_id, connector=job.connector, status="queued", logs=["[System] Scheduled execution"])
         await run.save()
         
         logger.info(f"📅 Scheduled job triggered: {job_id}, run: {run.id}")

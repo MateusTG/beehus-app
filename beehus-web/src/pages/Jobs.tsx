@@ -21,6 +21,13 @@ interface Workspace {
     description?: string;
 }
 
+interface Credential {
+    id: string;
+    workspace_id: string;
+    label: string;
+    username: string;
+}
+
 // Schedule presets for easy selection
 const SCHEDULE_PRESETS = [
     { label: 'No schedule (manual only)', value: '' },
@@ -40,6 +47,7 @@ const SCHEDULE_PRESETS = [
 export default function Jobs() {
     const [jobs, setJobs] = useState<Job[]>([]);
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+    const [credentials, setCredentials] = useState<Credential[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [creating, setCreating] = useState(false);
@@ -65,12 +73,14 @@ export default function Jobs() {
         workspace_id: string;
         name: string;
         connector: string;
+        credential_id?: string;
         params: { username?: string; password?: string; url?: string; selector?: string; [key: string]: any };
         schedule: string;
     }>({
         workspace_id: workspaceId || '',
         name: '',
         connector: 'jpmorgan_login',
+        credential_id: '',
         params: { username: '', password: '' },  // Dynamic based on connector
         schedule: ''
     });
@@ -95,9 +105,19 @@ export default function Jobs() {
         }
     };
 
+    const fetchCredentials = async () => {
+        try {
+            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/credentials`);
+            setCredentials(res.data);
+        } catch (error) {
+            console.error('Failed to fetch credentials:', error);
+        }
+    };
+
     useEffect(() => {
         fetchJobs();
         fetchWorkspaces();
+        fetchCredentials();
     }, []);
 
     // Update params when connector changes
@@ -412,33 +432,73 @@ export default function Jobs() {
                                     ) : (
                                         <>
                                             {formData.connector === 'jpmorgan_login' ? (
-                                                <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-4">
+                                                    {/* Credential Selector */}
                                                     <div>
-                                                        <label className="block text-sm text-slate-400 mb-2">Username</label>
-                                                        <input
-                                                            type="text"
-                                                            value={(formData.params as any).username || ''}
-                                                            onChange={(e) => setFormData({
-                                                                ...formData, 
-                                                                params: { ...formData.params, username: e.target.value }
-                                                            })}
+                                                        <label className="block text-sm text-slate-400 mb-2">
+                                                            Authentication Method
+                                                        </label>
+                                                        <select
+                                                            value={formData.credential_id || 'manual'}
+                                                            onChange={(e) => {
+                                                                const value = e.target.value;
+                                                                if (value === 'manual') {
+                                                                    setFormData({ ...formData, credential_id: '' });
+                                                                } else {
+                                                                    setFormData({ ...formData, credential_id: value, params: {} });
+                                                                }
+                                                            }}
                                                             className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
-                                                            placeholder="user@example.com"
-                                                        />
+                                                        >
+                                                            <option value="manual">Manual (enter username/password)</option>
+                                                            <optgroup label="Saved Credentials">
+                                                                {credentials
+                                                                    .filter(c => c.workspace_id === formData.workspace_id)
+                                                                    .map(cred => (
+                                                                        <option key={cred.id} value={cred.id}>
+                                                                            🔐 {cred.label} ({cred.username})
+                                                                        </option>
+                                                                    ))}
+                                                            </optgroup>
+                                                        </select>
+                                                        {credentials.filter(c => c.workspace_id === formData.workspace_id).length === 0 && formData.workspace_id && (
+                                                            <p className="text-xs text-slate-500 mt-1">
+                                                                No credentials found for this workspace. <a href="/credentials" className="text-brand-400 hover:underline">Create one</a>
+                                                            </p>
+                                                        )}
                                                     </div>
-                                                    <div>
-                                                        <label className="block text-sm text-slate-400 mb-2">Password</label>
-                                                        <input
-                                                            type="password"
-                                                            value={(formData.params as any).password || ''}
-                                                            onChange={(e) => setFormData({
-                                                                ...formData,
-                                                                params: { ...formData.params, password: e.target.value }
-                                                            })}
-                                                            className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
-                                                            placeholder="••••••••"
-                                                        />
-                                                    </div>
+
+                                                    {/* Manual Entry Fields (only if no credential selected) */}
+                                                    {!formData.credential_id && (
+                                                        <div className="grid grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label className="block text-sm text-slate-400 mb-2">Username</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={(formData.params as any).username || ''}
+                                                                    onChange={(e) => setFormData({
+                                                                        ...formData,
+                                                                        params: { ...formData.params, username: e.target.value }
+                                                                    })}
+                                                                    className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
+                                                                    placeholder="user@example.com"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm text-slate-400 mb-2">Password</label>
+                                                                <input
+                                                                    type="password"
+                                                                    value={(formData.params as any).password || ''}
+                                                                    onChange={(e) => setFormData({
+                                                                        ...formData,
+                                                                        params: { ...formData.params, password: e.target.value }
+                                                                    })}
+                                                                    className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
+                                                                    placeholder="••••••••"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ) : (
                                                 <div className="space-y-3">

@@ -5,6 +5,7 @@ from core.models.mongo_models import Job
 from core.db import init_db
 import asyncio
 from celery.schedules import crontab
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -17,29 +18,42 @@ class MongoScheduleEntry(ScheduleEntry):
 
 class MongoScheduler(Scheduler):
     Entry = MongoScheduleEntry
+    
+    # Sync with MongoDB every 60 seconds
+    max_interval = 60
 
     def __init__(self, *args, **kwargs):
         self._schedule = {}
         super().__init__(*args, **kwargs)
-        self.max_interval = 60  # Sync with DB every 60 seconds
 
     def setup_schedule(self):
+        """Initialize schedule from MongoDB"""
         self.install_default_entries(self._schedule)
-        self.sync_data()
+        self.sync_from_db()
 
-    def sync_data(self):
+    def sync_from_db(self):
         """Sync schedule from MongoDB"""
         logger.info("🔄 Syncing Celery Beat schedule from MongoDB...")
         try:
-            # We need to run async DB code in sync context
+            # Run async DB code in sync context
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             new_schedule = loop.run_until_complete(self._get_jobs_from_db())
             loop.close()
 
-            # Update schedule
+            # Remove jobs that no longer exist in DB
+            current_job_keys = set(self._schedule.keys())
+            new_job_keys = set(new_schedule.keys())
+            
+            removed_jobs = current_job_keys - new_job_keys - {'celery.backend_cleanup'}
+            for job_key in removed_jobs:
+                logger.info(f"🗑️  Removing deleted job: {job_key}")
+                self._schedule.pop(job_key, None)
+            
+            # Update schedule with new/modified jobs
             self.merge_inplace(new_schedule)
-            logger.info(f"✅ Synced {len(new_schedule)} periodic jobs")
+            
+            logger.info(f"✅ Synced {len(new_schedule)} periodic jobs (removed {len(removed_jobs)})")
         except Exception as e:
             logger.error(f"❌ Failed to sync schedule: {e}")
 
@@ -48,10 +62,6 @@ class MongoScheduler(Scheduler):
             await init_db()
             logger.info("🔍 Querying MongoDB for scheduled jobs...")
             
-            # Query all jobs first to see what we have
-            all_jobs = await Job.find_all().to_list()
-            logger.info(f"📊 Total jobs in database: {len(all_jobs)}")
-            
             # Query for scheduled jobs
             jobs = await Job.find(
                 Job.status == "active",
@@ -59,15 +69,12 @@ class MongoScheduler(Scheduler):
                 Job.schedule != ""
             ).to_list()
             
-            logger.info(f"📅 Jobs with schedules: {len(jobs)}")
-            for job in all_jobs:
-                logger.info(f"  - Job {job.id}: status={job.status}, schedule={job.schedule}")
+            logger.info(f"📅 Found {len(jobs)} scheduled jobs")
 
             schedule = {}
             for job in jobs:
                 try:
-                    # Assuming simple cron: "minute hour day month day_of_week"
-                    # TODO: Add validation or robust parsing
+                    # Parse cron: "minute hour day month day_of_week"
                     parts = job.schedule.split()
                     if len(parts) == 5:
                         schedule[f'job-{job.id}'] = self.Entry(
@@ -96,29 +103,10 @@ class MongoScheduler(Scheduler):
 
     @property
     def schedule(self):
-        if not self._schedule:
-            self.sync_data()
+        """Return current schedule"""
         return self._schedule
     
-    def needs_update(self):
-        """Check if we need to sync from DB"""
-        # For now, we rely on the loop period (max_interval) calling sync
-        # But explicitly returning True forces a sync check if implemented in loop
-        return True
-
-    def tick(self, event_t=None, sleeping=False):
-        # Override tick to sync periodically
-        # In default Scheduler, tick calls sync(). 
-        # But we want to enforce DB sync.
-        
-        # NOTE: simplistic approach. proper way is to rely on max_interval
-        # and checking for modifications. 
-        # Here we just blindly reload on every sync interval (controlled by max_interval)
-        if self._heap is None:
-             self.sync_data()
-        
-        return super().tick(event_t, sleeping)
-
     def sync(self):
-        self.sync_data()
-        super().sync()
+        """Called periodically by Celery Beat to sync schedules"""
+        logger.info("⏰ Periodic sync triggered")
+        self.sync_from_db()

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Re-expose ports for local development/debugging
   mongo:

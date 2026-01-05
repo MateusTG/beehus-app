@@ -3,22 +3,58 @@ App Console API - FastAPI application for managing workspaces, jobs, and runs.
 Migrated to use Beanie (MongoDB) and Celery for task execution.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from cryptography.fernet import Fernet
 import os
+import asyncio
+import json
+import redis.asyncio as redis
 from typing import List
+from datetime import datetime
 
 from core.db import init_db, close_db
 from core.config import settings
 from core.models.mongo_models import Workspace, InboxIntegration, OtpRule, Job, Run, OtpAudit
 from core.tasks import scrape_task
+from django_config import celery_app
 from core.schemas.otp import (
     WorkspaceCreate, WorkspaceResponse,
     InboxIntegrationCreate, InboxIntegrationResponse,
     OtpRuleCreate, OtpRuleResponse
 )
 from app.console.schemas import JobCreate, JobResponse, RunResponse
+from app.console.websockets import ConnectionManager
 
+# WebSocket Manager
+manager = ConnectionManager()
+
+# Background Redis Listener
+async def redis_listener():
+    """
+    Subscribes to Redis 'run_updates' channel and broadcasts messages to WebSockets.
+    """
+    try:
+        r = redis.from_url(settings.REDIS_URL)
+        pubsub = r.pubsub()
+        await pubsub.subscribe("run_updates")
+        
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                data = message["data"]
+                if isinstance(data, bytes):
+                    data = data.decode("utf-8")
+                
+                try:
+                    payload = json.loads(data)
+                    await manager.broadcast(payload)
+                except json.JSONDecodeError:
+                    print(f"Failed to decode Redis message: {data}")
+                    
+    except asyncio.CancelledError:
+        # Task cancelled on shutdown
+        pass
+    except Exception as e:
+        print(f"Redis listener error: {e}")
 
 # Crypto Helpers
 def encrypt_token(token: str) -> str:
@@ -35,11 +71,21 @@ def decrypt_token(token: str) -> str:
     return f.decrypt(token.encode()).decode()
 
 
-# Lifecycle for Beanie initialization
+# Lifecycle for Beanie initialization and Background Tasks
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup Beanie connection."""
+    """Initialize DB and start background tasks."""
+    # Startup
     await init_db()
+    redis_task = asyncio.create_task(redis_listener())
+    
     yield
+    
+    # Shutdown
+    redis_task.cancel()
+    try:
+        await redis_task
+    except asyncio.CancelledError:
+        pass
     await close_db()
 
 
@@ -63,8 +109,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.console.routers import auth
+from app.console.routers import auth, credentials
 app.include_router(auth.router)
+app.include_router(credentials.router)
 
 
 # ============================================================================
@@ -238,17 +285,21 @@ async def trigger_run(job_id: str):
         raise HTTPException(status_code=400, detail="Job is not active")
     
     # 2. Create run document
-    run = Run(job_id=job.id, status="queued")
+    run = Run(job_id=job.id, connector=job.connector, status="queued")
     await run.save()
     
     # 3. Dispatch to Celery (replaces HTTP call to orchestrator)
-    scrape_task.delay(
+    task = scrape_task.delay(
         job_id=job.id,
         run_id=str(run.id),  # Convert to string
         workspace_id=job.workspace_id,
         connector_name=job.connector,
         params=job.params
     )
+    
+    # 4. Save task ID for cancellation support
+    run.celery_task_id = task.id
+    await run.save()
     
     return run
 
@@ -274,10 +325,13 @@ async def retry_run(job_id: str, run_id: str):
     run.error_summary = None
     run.started_at = None
     run.finished_at = None
+    # Ensure connector is set (for old runs that didn't have it)
+    if not run.connector and job:
+        run.connector = job.connector
     await run.save()
     
     # Re-dispatch to Celery
-    scrape_task.delay(
+    task = scrape_task.delay(
         job_id=job.id,
         run_id=run.id,
         workspace_id=job.workspace_id,
@@ -285,7 +339,37 @@ async def retry_run(job_id: str, run_id: str):
         params=job.params
     )
     
+    # Save new task ID
+    run.celery_task_id = task.id
+    await run.save()
+    
     return run
+
+
+@app.post("/runs/{run_id}/stop")
+async def stop_run(run_id: str):
+    """
+    Stop/cancel a running or queued job.
+    """
+    run = await Run.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    if run.status not in ["queued", "running"]:
+        raise HTTPException(status_code=400, detail=f"Cannot stop run with status '{run.status}'")
+    
+    # Revoke the Celery task if we have a task ID
+    if run.celery_task_id:
+        celery_app.control.revoke(run.celery_task_id, terminate=True)
+    
+    # Update run status
+    run.status = "failed"
+    run.error_summary = "Cancelled by user"
+    run.logs.append(f"[{datetime.now().time()}] 🛑 Run cancelled by user")
+    run.finished_at = datetime.utcnow()
+    await run.save()
+    
+    return {"message": f"Run {run_id} stopped successfully", "run_id": run_id}
 
 
 # ============================================================================
@@ -381,11 +465,11 @@ async def get_recent_runs(limit: int = 10):
     
     result = []
     for run in runs:
-        # Get job details - handle case where job might not exist
-        job = None
-        connector_name = "Unknown"
+        # Use connector from run if available, otherwise try to fetch from job
+        connector_name = run.connector if run.connector else "Unknown"
         
-        if run.job_id and run.job_id != "test-job":
+        # If connector not in run, try to fetch from job (for backwards compatibility)
+        if not run.connector and run.job_id and run.job_id != "test-job":
             try:
                 job = await Job.get(run.job_id)
                 if job:
@@ -433,4 +517,23 @@ async def trigger_jpmorgan_test(user: str = "demo_user", password: str = "demo_p
     task = login_to_jpmorgan_task.delay(user, password, str(run.id))
     
     return {"status": "triggered", "task_id": task.id, "run_id": str(run.id)}
+
+
+# ============================================================================
+# WebSocket Endpoints
+# ============================================================================
+
+@app.websocket("/ws/runs")
+async def websocket_runs_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive
+            # We don't expect messages from client, but we need to await something
+            # to keep the connection open and detect disconnects
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
 

@@ -6,6 +6,7 @@ import LiveView from './pages/LiveView';
 import Workspaces from './pages/Workspaces';
 import Jobs from './pages/Jobs';
 import Runs from './pages/Runs';
+import Credentials from './pages/Credentials';
 import ProtectedRoute from './components/ProtectedRoute';
 
 import { AuthProvider } from './context/AuthContext';
@@ -47,6 +48,12 @@ function App() {
             <Route path="/live/:runId" element={
               <ProtectedRoute>
                 <LiveView />
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/credentials" element={
+              <ProtectedRoute>
+                <Credentials />
               </ProtectedRoute>
             } />
             
