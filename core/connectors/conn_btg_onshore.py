@@ -6,26 +6,19 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-class JPMorganConnector(BaseConnector):
+class BTGOnshoreConnector(BaseConnector):
     @property
     def name(self):
-        return "jpmorgan_login"
+        return "btg_onshore_login"
 
     async def scrape(self, driver, params: Dict[str, Any]) -> ScrapeResult:
-        logger.info(f"Starting Itau Login with params: {params}")
+        logger.info(f"Starting BTG Onshore Login with params: {params}")
         
         run_id = params.get("run_id")
-
-        # pegar agencia e conta
-        agencia = params.get("agencia")
-        conta = params.get("conta")
-
         # Support both 'user' (from legacy) and 'username' (from new UI)
         user = params.get("username") or params.get("user")
         password = params.get("password")
         
-
-
         # Import models here to avoid circular imports if any, or ensuring context
         from core.models.mongo_models import Run
         from core.db import init_db
@@ -47,7 +40,7 @@ class JPMorganConnector(BaseConnector):
                 run.logs.append(f"[{datetime.now().time()}] {msg}")
                 await run.save()
 
-        _url = "https://secure.chase.com/web/auth/?treatment=jpo#/logon/logon/chaseOnline"
+        _url = "https://app.btgpactual.com/login"
 
         try:
             # 1. Navegação
@@ -55,18 +48,6 @@ class JPMorganConnector(BaseConnector):
             driver.get(_url)
             
             # 2. Preenchimento de campos
-            # id de agencia = "idl-more-access-input-agency"
-            # id de conta corrente = "idl-more-access-input-account"
-            # <a role="button" href="javascript:selecionarAssessor();" title="Selecionar Assessores" class="itau-button btn-fluxo margem-direita10 margem-baixo10" tabindex="0">ASSESSORES</a>
-
-            # cpf
-            # <input _ngcontent-juu-c92="" formcontrolname="cpf" type="tel" id="cpf" autocorrect="off" autocapitalize="off" autocomplete="off" mask="000.000.000-00" required="" class="it-auth-id__input ng-pristine ng-invalid ng-touched">
-            # <button _ngcontent-juu-c53="" class="it-button it-button--private" id="submitBtn" type="button" disabled="" customlinkanalytics="" openmodalonclickanalytics=""><!----> acessar </button>
-
-            # senha - vai ter que achar botao correspondente no corpo do html e clicar
-            # <input _ngcontent-mds-c86="" id="digital-password" type="password" readonly="" required="" class="it-password-keyboard__input">
-            # <div _ngcontent-mds-c85="" class="it-auth-keyboard__digits"><span _ngcontent-mds-c85="" id="feedbackButton" aria-live="assertive" class="it-auth-keyboard__digit--hidden"></span><button _ngcontent-mds-c85="" class="it-auth-keyboard__digit" aria-hidden="false"> 0 ou 9 </button><button _ngcontent-mds-c85="" class="it-auth-keyboard__digit" aria-hidden="false"> 8 ou 3 </button><button _ngcontent-mds-c85="" class="it-auth-keyboard__digit" aria-hidden="false"> 7 ou 5 </button><button _ngcontent-mds-c85="" class="it-auth-keyboard__digit" aria-hidden="false"> 4 ou 6 </button><button _ngcontent-mds-c85="" class="it-auth-keyboard__digit" aria-hidden="false"> 1 ou 2 </button><!----><button _ngcontent-mds-c85="" data-testid="clearButton" aria-label="apagar todo o campo de senha eletrônica" class="it-auth-keyboard__digit it-auth-keyboard__digit--remove" aria-hidden="false"></button></div>
-
             await log("Waiting for user input field...")
             user_id_field = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "userId-input-field-input"))

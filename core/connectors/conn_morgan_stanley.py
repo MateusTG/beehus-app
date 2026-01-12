@@ -6,13 +6,13 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-class JPMorganConnector(BaseConnector):
+class MorganStanleyConnector(BaseConnector):
     @property
     def name(self):
-        return "jpmorgan_login"
+        return "morgan_stanley_login"
 
     async def scrape(self, driver, params: Dict[str, Any]) -> ScrapeResult:
-        logger.info(f"Starting JPMorgan Login with params: {params}")
+        logger.info(f"Starting Morgan Stanley Login with params: {params}")
         
         run_id = params.get("run_id")
         # Support both 'user' (from legacy) and 'username' (from new UI)

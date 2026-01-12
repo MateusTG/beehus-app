@@ -49,8 +49,8 @@ class JPMorganConnector(BaseConnector):
         async def log(msg):
             logger.info(f"[JPMorgan] {msg}")
             if run:
-                run.logs.append(f"[{datetime.now().time()}] {msg}")
-                await run.save()
+                timestamped_msg = f"[{datetime.now().time()}] {msg}"
+                await run.update({"$push": {"logs": timestamped_msg}})
 
         _url = "https://secure.chase.com/web/auth/?treatment=jpo#/logon/logon/chaseOnline"
 

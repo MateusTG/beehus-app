@@ -6,13 +6,13 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-class JPMorganConnector(BaseConnector):
+class ItauOffshoreConnector(BaseConnector):
     @property
     def name(self):
-        return "jpmorgan_login"
+        return "itau_offshore_login"
 
     async def scrape(self, driver, params: Dict[str, Any]) -> ScrapeResult:
-        logger.info(f"Starting JPMorgan Login with params: {params}")
+        logger.info(f"Starting Itau Offshore Login with params: {params}")
         
         run_id = params.get("run_id")
         # Support both 'user' (from legacy) and 'username' (from new UI)
@@ -40,7 +40,7 @@ class JPMorganConnector(BaseConnector):
                 run.logs.append(f"[{datetime.now().time()}] {msg}")
                 await run.save()
 
-        _url = "https://secure.chase.com/web/auth/?treatment=jpo#/logon/logon/chaseOnline"
+        _url = "https://ebanking.itauprivatebank.com/auth/login"
 
         try:
             # 1. Navegação

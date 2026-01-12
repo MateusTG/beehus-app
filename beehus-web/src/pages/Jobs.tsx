@@ -390,6 +390,12 @@ export default function Jobs() {
                                         className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
                                     >
                                         <option value="jpmorgan_login">JPMorgan Login</option>
+                                        <option value="itau_onshore_login">Itau Onshore Login</option>
+                                        <option value="itau_offshore_login">Itau Offshore Login</option>
+                                        <option value="btg_onshore_login">BTG Onshore Login</option>
+                                        <option value="btg_offshore_login">BTG Offshore Login</option>
+                                        <option value="morgan_stanley_login">Morgan Stanley Login</option>
+                                        <option value="jefferies_login">Jefferies Login</option>
                                         <option value="generic_scraper">Generic Scraper</option>
                                     </select>
                                 </div>
@@ -431,7 +437,7 @@ export default function Jobs() {
                                         </div>
                                     ) : (
                                         <>
-                                            {formData.connector === 'jpmorgan_login' ? (
+                                            {['jpmorgan_login', 'itau_onshore_login', 'itau_offshore_login', 'btg_onshore_login', 'btg_offshore_login', 'morgan_stanley_login', 'jefferies_login'].includes(formData.connector) ? (
                                                 <div className="space-y-4">
                                                     {/* Credential Selector */}
                                                     <div>

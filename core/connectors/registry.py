@@ -24,7 +24,9 @@ ConnectorRegistry.register(OtpExampleConnector)
 
 # Register new connectors
 from core.connectors.conn_jpmorgan import JPMorganConnector
+from core.connectors.conn_itau_onshore import ItauOnshoreConnector
 from core.connectors.generic import GenericScraperConnector
 
 ConnectorRegistry.register(JPMorganConnector)
+ConnectorRegistry.register(ItauOnshoreConnector)
 ConnectorRegistry.register(GenericScraperConnector)

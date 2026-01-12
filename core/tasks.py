@@ -61,6 +61,10 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     execution_params["username"] = credential.username
                     decrypted_password = decrypt_value(credential.encrypted_password)
                     execution_params["password"] = decrypted_password
+                    
+                    # Inject extended metadata (agencia, conta, etc.)
+                    if credential.metadata:
+                        execution_params.update(credential.metadata)
                     if not decrypted_password:
                         logger.error(f"Credential decryption failed for job {job_id}")
                 else:
