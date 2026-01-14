@@ -218,7 +218,7 @@ class ItauOnshoreConnector(BaseConnector):
             # </li>
             posicao_diaria = wait.until(
                 EC.element_to_be_clickable((By.XPATH,
-                    "//a[contains(@data-op,'pf-posicao-diaria-investimentos')]"
+                    "//a[contains(@onclick,\"posicaoDiaria\") or normalize-space()='posição diária']"
                 ))
             )
             posicao_diaria.click()
@@ -226,56 +226,79 @@ class ItauOnshoreConnector(BaseConnector):
             
             # Relatorio
             # <button _ngcontent-ng-c2437018688="" role="tab" type="button" class="ids-tabs__item ids-tabs__item--selected" id="ids-tabs-0-5" tabindex="0" aria-selected="true" aria-controls="ids-tabs-0-panel-5"><!----><span _ngcontent-ng-c2437018688="" class="ids-tabs__text">Relatórios</span><!----></button>
-            # relatorio_tab = wait.until(
-            #     EC.element_to_be_clickable((By.XPATH,
-            #         "//button[@role='tab' and contains(normalize-space(.), 'Meus investimentos')]"
-            #     ))
-            # )
-            # relatorio_tab.click()
-            # await log("Clicked Meus investimentos Tab")
-                     
+            relatorio_tab = wait.until(
+                EC.element_to_be_clickable((By.XPATH,
+                    "//button[contains(@class,'ids-tabs__item')][.//span[normalize-space()='Relatórios']]"
+                ))
+            )
+            relatorio_tab.click()
+            await log("Clicked Relatorio Tab")
+            
+            # Data Posicao
+            # <button _ngcontent-ng-c2437018688="" role="tab" type="button" class="ids-tabs__item ids-tabs__item--selected" id="ids-tabs-0-5" tabindex="0" aria-selected="true" aria-controls="ids-tabs-0-panel-5"><!----><span _ngcontent-ng-c2437018688="" class="ids-tabs__text">Relatórios</span><!----></button>
+            data_posicao = wait.until(
+                EC.element_to_be_clickable((By.XPATH,
+                    "//button[contains(@class,'ids-tabs__item')][.//span[normalize-space()='Data Posição']]"
+                ))
+            )
+            data_posicao.click()
+            await log("Clicked Data Posicao")
+            
             # Data
             # <button _ngcontent-ng-c67500750="" class="btn-chip"> 07/01/2026 <ids-icon _ngcontent-ng-c67500750="" size="S" class="ids-icon ids-icon--small notranslate"><span aria-hidden="true">seta_cima_achatada</span></ids-icon><!----></button>
-            # data_btn = wait.until(
-            #     EC.visibility_of_element_located((By.XPATH,
-            #          "//input[@formcontrolname='date' and @idsmask='date' and @placeholder='DD/MM/YYYY']"
-            #     ))
-            # )
+            data_btn = wait.until(
+                EC.element_to_be_clickable((By.XPATH,
+                    "//button[contains(@class,'btn-chip')][.//span[normalize-space()='Data Posição']]"
+                ))
+            )
 
-            # current_date_text = (data_btn.get_attribute("value") or "").strip()
-            # current_date = datetime.strptime(current_date_text, "%d/%m/%Y").date()
-            # await log("Clicked Data Posicao", current_date_text)
+            current_date_text = data_btn.text.strip()
+            current_date = datetime.strptime(current_date_text, "%d/%m/%Y").date()
 
-            # data_btn.click()
-            # data_btn.send_keys(Keys.ESCAPE)
-            # await log("Clicked Data Posicao")
+            expected_previous = get_previous_business_day(ref_date=datetime.today().date())
 
-
-            # expected_previous = get_previous_business_day(ref_date=datetime.today().date())
-            # expected_label = expected_previous.strftime("%d/%m/%Y")
-
-            # if current_date != expected_previous:
-            #     # Atualiza a data (ex.: abrindo o seletor e escolhendo o dia útil anterior)
-
-            #     data_btn.send_keys(Keys.CONTROL, "a")
-            #     data_btn.send_keys(Keys.DELETE)
-            #     data_btn.send_keys(expected_label)
-            #     data_btn.send_keys(Keys.ENTER)
-            # else:
-            #     data_btn.send_keys(Keys.ENTER)
-
-            # await log("Altered Data")
+            if current_date != expected_previous:
+                # Atualiza a data (ex.: abrindo o seletor e escolhendo o dia útil anterior)
+                data_btn.click()
+                expected_label = expected_previous.strftime("%d/%m/%Y")
+                wait.until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, f"//button[contains(@class,'btn-chip')][contains(normalize-space(), '{expected_label}')]")
+                    )
+                ).click()
+            else:
+                data_btn.click()
+            await log("Clicked Data")
+            
+            # confirmar
+            # <button idsmainbutton="" _nghost-ng-c3171858074="" class="ids-main-button" tabindex="0"><span _ngcontent-ng-c3171858074="" class="ids-main-button__content">Confirmar</span><!----></button>
+            confirmar_btn = wait.until(
+                EC.element_to_be_clickable((By.XPATH,
+                    "//button[contains(@class,'ids-main-button')][.//span[normalize-space()='Confirmar']]"
+                ))
+            )
+            confirmar_btn.click()
+            await log("Clicked Confirmar")
             
             # Formato Excel
             # <ids-form-selection><div class="ids-form-selection"><div class="ids-form-selection__input"><span class="ids-radio-button"><input type="radio" idsradiobutton="" name="undefined" value="2" aria-invalid="false" id="ids-radio-button-8" aria-labelledby="ids-radio-button-8-label" class="ids-radio-button__input"><i aria-hidden="true" class="ids-icon ids-icon--medium ids-radio-button__icon"></i></span></div><label class="ids-form-selection__label ids-label" for="ids-radio-button-8" id="ids-radio-button-8-label" aria-hidden="true"><span class="ids-label"> Excel </span></label></div></ids-form-selection>
             formato_excel = wait.until(
                 EC.element_to_be_clickable((By.XPATH,
-                    "//button[@type='button' and @aria-label='Baixar detalhamento de ativos em Excel']"
+                    "//ids-form-selection//span[contains(@class,'ids-label')][.//span[normalize-space()='Excel']]"
                 ))
             )
             formato_excel.click()
-            await log("Clicked Export Excel")
+            await log("Clicked Formato Excel")
             
+            # Botao "Baixar relatorio"
+            # <button idsmainbutton="" _nghost-ng-c3171858074="" class="ids-main-button"><span _ngcontent-ng-c3171858074="" class="ids-main-button__content"> Baixar relatório <ids-icon class="ids-icon notranslate"><span aria-hidden="true">download_base</span></ids-icon></span><!----></button>
+            download_btn = wait.until(
+                EC.element_to_be_clickable((By.XPATH,
+                    "//button[contains(@class,'ids-main-button')][.//span[normalize-space()='Baixar relatório']]"
+                ))
+            )
+            download_btn.click()
+            await log("Clicked Download")
             
             # Sair
             # <a onclick="GA.pushHeader('botaoSair');triggerGA4Event('click', 'header:sair');" data-op="fm7xOEMMTW4yb9LvLQQy2nI6Tfx4JaM1cDkBFLiOOQU=;" role="button" id="linkSairHeader" class="btn-nav" href="" tabindex="0" accesskey="S">
