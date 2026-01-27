@@ -42,6 +42,24 @@ class JefferiesActions:
         self.helpers.wait_until(lambda d: el.is_displayed() and el.is_enabled(), timeout=timeout)
         return el
 
+    def _click_with_fallback(self, locator) -> bool:
+        try:
+            self.helpers.click_element(*locator)
+            return True
+        except Exception:
+            pass
+
+        try:
+            elements = self.driver.find_elements(*locator)
+            for el in elements:
+                if el.is_displayed():
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", el)
+                    self.driver.execute_script("arguments[0].click();", el)
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _wait_for_data(self, rows_locator, timeout: int = 40) -> bool:
         try:
             self.helpers.wait_for_invisibility(*self.sel.LOADING_SPINNER)
@@ -180,11 +198,11 @@ class JefferiesActions:
     # ========== OTP ==========
 
     async def request_otp(self) -> None:
-        self.helpers.click_element(*self.sel.CONTACT_METHOD)
-        self.helpers.click_element(*self.sel.CONTACT_METHOD_OPTION)
+        self._click_with_fallback(self.sel.CONTACT_METHOD)
+        self._click_with_fallback(self.sel.CONTACT_METHOD_OPTION)
         await self.log("OK Contact method selected")
 
-        self.helpers.click_element(*self.sel.SEND_CODE)
+        self._click_with_fallback(self.sel.SEND_CODE)
         await self.log("OK OTP requested")
 
     async def wait_for_otp(self, timeout_seconds: int = 240, max_attempts: int = 3) -> None:
@@ -214,12 +232,12 @@ class JefferiesActions:
     # ========== EXPORTS ==========
 
     async def export_holdings(self, date: str = None) -> None:
-        self.helpers.click_element(*self.sel.NAV_ACCOUNTS)
-        self.helpers.click_element(*self.sel.NAV_HOLDINGS)
+        self._click_with_fallback(self.sel.NAV_ACCOUNTS)
+        self._click_with_fallback(self.sel.NAV_HOLDINGS)
         await self.log(f"OK Holdings opened (Target date: {date})")
 
-        self.helpers.click_element(*self.sel.SHOWING_SELECT)
-        self.helpers.click_element(*self.sel.PRIOR_CLOSE_OPTION)
+        self._click_with_fallback(self.sel.SHOWING_SELECT)
+        self._click_with_fallback(self.sel.PRIOR_CLOSE_OPTION)
         await self.log("OK Prior Close selected")
 
         if self._wait_for_data(self.sel.HOLDINGS_ROWS):
@@ -229,17 +247,17 @@ class JefferiesActions:
 
         self._wait_for_export_ready()
 
-        self.helpers.click_element(*self.sel.DOWNLOAD_BTN)
-        self.helpers.click_element(*self.sel.EXPORT_EXCEL)
+        self._click_with_fallback(self.sel.DOWNLOAD_BTN)
+        self._click_with_fallback(self.sel.EXPORT_EXCEL)
         await self.log("OK Holdings exported")
 
     async def export_history(self, date: str = None, start_date: str = None, end_date: str = None) -> None:
-        self.helpers.click_element(*self.sel.NAV_HISTORY)
+        self._click_with_fallback(self.sel.NAV_HISTORY)
         await self.log(f"OK History opened (Target date: {date})")
 
-        self.helpers.click_element(*self.sel.TIME_PERIOD)
-        self.helpers.click_element(*self.sel.PREV_BUSINESS_DAY)
-        self.helpers.click_element(*self.sel.APPLY_FILTERS)
+        self._click_with_fallback(self.sel.TIME_PERIOD)
+        self._click_with_fallback(self.sel.PREV_BUSINESS_DAY)
+        self._click_with_fallback(self.sel.APPLY_FILTERS)
         await self.log("OK History filter applied")
 
         if self._wait_for_data(self.sel.HISTORY_ROWS):
@@ -249,13 +267,13 @@ class JefferiesActions:
 
         self._wait_for_export_ready()
 
-        self.helpers.click_element(*self.sel.DOWNLOAD_BTN)
-        self.helpers.click_element(*self.sel.EXPORT_EXCEL)
+        self._click_with_fallback(self.sel.DOWNLOAD_BTN)
+        self._click_with_fallback(self.sel.EXPORT_EXCEL)
         await self.log("OK History exported")
 
     # ========== LOGOUT ==========
 
     async def logout(self) -> None:
         if self._click_if_visible(self.sel.USER_MENU):
-            self.helpers.click_element(*self.sel.LOGOUT_BTN)
+            self._click_with_fallback(self.sel.LOGOUT_BTN)
             await self.log("OK Logged out")

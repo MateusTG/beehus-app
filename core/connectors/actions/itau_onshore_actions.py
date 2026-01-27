@@ -34,6 +34,25 @@ class ItauOnshoreActions:
         self.helpers = helpers
         self.sel = selectors
         self.log = log_func
+
+    def _click_with_fallback(self, locator) -> bool:
+        try:
+            self.helpers.click_element(*locator)
+            return True
+        except Exception:
+            pass
+
+        try:
+            elements = self.driver.find_elements(*locator)
+            for el in elements:
+                if el.is_displayed():
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", el)
+                    self.driver.execute_script("arguments[0].click();", el)
+                    return True
+        except Exception:
+            pass
+
+        return False
     
     # ========== NAVEGAÇÃO ==========
     
@@ -72,21 +91,17 @@ class ItauOnshoreActions:
     async def submit_access(self) -> None:
         """Clica no botão de acessar após preencher agência e conta."""
         await self.log("Clicando em Acessar...")
-        try:
-            self.helpers.click_element(*self.sel.SUBMIT_MORE_ACCESS)
-        except Exception:
+        if not self._click_with_fallback(self.sel.SUBMIT_MORE_ACCESS):
             await self.log("Fallback: Tentando botão alternativo...")
-            self.helpers.click_element(*self.sel.ACCESS_FALLBACK)
+            self._click_with_fallback(self.sel.ACCESS_FALLBACK)
         await self.log("OK Acesso enviado")
     
     async def select_assessores_profile(self) -> None:
         """Seleciona o perfil de Assessores."""
         await self.log("Selecionando perfil Assessores...")
-        try:
-            self.helpers.click_element(*self.sel.ASSESSORES_BTN)
-        except Exception:
+        if not self._click_with_fallback(self.sel.ASSESSORES_BTN):
             await self.log("Fallback: Tentando link ASSESSORES...")
-            self.helpers.click_element(*self.sel.ASSESSORES_LINK)
+            self._click_with_fallback(self.sel.ASSESSORES_LINK)
         await self.log("OK Perfil Assessores selecionado")
     
     async def fill_cpf(self, cpf: str) -> None:
@@ -103,7 +118,7 @@ class ItauOnshoreActions:
     async def submit_cpf(self) -> None:
         """Clica no botão de submit após preencher o CPF."""
         await self.log("Enviando CPF...")
-        self.helpers.click_element(*self.sel.SUBMIT_BTN)
+        self._click_with_fallback(self.sel.SUBMIT_BTN)
         await self.log("OK CPF enviado")
     
     async def fill_password_keyboard(self, password: str) -> None:
@@ -130,7 +145,7 @@ class ItauOnshoreActions:
     async def submit_password(self) -> None:
         """Clica no botão de continuar após preencher a senha."""
         await self.log("Enviando senha...")
-        self.helpers.click_element(*self.sel.SUBMIT_BTN)
+        self._click_with_fallback(self.sel.SUBMIT_BTN)
         await self.log("OK Senha enviada")
     
     # ========== MENU E NAVEGAÇÃO INTERNA ==========
@@ -144,26 +159,26 @@ class ItauOnshoreActions:
     async def navigate_to_posicao_diaria(self) -> None:
         """Navega para a página de Posição Diária."""
         await self.log("Navegando para Posição Diária...")
-        self.helpers.click_element(*self.sel.POSICAO_DIARIA)
+        self._click_with_fallback(self.sel.POSICAO_DIARIA)
 
         await self.log("OK Posição Diária carregada")
     
     async def navigate_to_conta_corrente(self) -> None:
         """Navega para a pagina de Conta Corrente."""
         await self.log("Navegando para Conta Corrente...")
-        self.helpers.click_element(*self.sel.CONTA_CORRENTE)
+        self._click_with_fallback(self.sel.CONTA_CORRENTE)
         await self.log("OK Conta Corrente carregada")
 
     async def open_extrato(self) -> None:
         """Abre a pagina de Extrato."""
         await self.log("Abrindo extrato...")
-        self.helpers.click_element(*self.sel.EXTRATO)
+        self._click_with_fallback(self.sel.EXTRATO)
         await self.log("OK Extrato aberto")
 
     async def set_extrato_date_range(self, start_date: str, end_date: str) -> None:
         """Define data inicial e final do extrato."""
         await self.log("Selecionando periodo personalizado...")
-        self.helpers.click_element(*self.sel.EXTRATO_PERIODO_TRIGGER)
+        self._click_with_fallback(self.sel.EXTRATO_PERIODO_TRIGGER)
         option = self.helpers.wait_for_visible(*self.sel.EXTRATO_PERIODO_PERSONALIZADO)
         self.helpers.wait_until(lambda d: option.is_enabled())
         option.click()
@@ -190,8 +205,8 @@ class ItauOnshoreActions:
         await self.log("Exportando extrato para Excel...")
         # Aguarda o loading sumir para nao interceptar o clique
         self.helpers.wait_for_invisibility(*self.sel.EXTRATO_LOADING)
-        self.helpers.click_element(*self.sel.EXTRATO_EXPORT_MENU)
-        self.helpers.click_element(*self.sel.EXTRATO_EXPORT_EXCEL)
+        self._click_with_fallback(self.sel.EXTRATO_EXPORT_MENU)
+        self._click_with_fallback(self.sel.EXTRATO_EXPORT_EXCEL)
 
         try:
             checks = self.driver.find_elements(*self.sel.EXTRATO_EXCEL_CHECKBOXES)
@@ -201,7 +216,7 @@ class ItauOnshoreActions:
         except Exception:
             pass
 
-        self.helpers.click_element(*self.sel.EXTRATO_EXCEL_SAVE)
+        self._click_with_fallback(self.sel.EXTRATO_EXCEL_SAVE)
         await self.log("OK Exportacao do extrato iniciada")
         await self.log("Aguardando 15s para download...")
         await asyncio.sleep(15)
@@ -238,11 +253,11 @@ class ItauOnshoreActions:
         except Exception:
             await self.log("Fallback: botao Excel nao encontrado, tentando alternativos...")
             try:
-                self.helpers.click_element(*self.sel.EXPORT_EXCEL_BTN_ALT)
+                self._click_with_fallback(self.sel.EXPORT_EXCEL_BTN_ALT)
             except Exception:
                 # Fluxo alternativo: selecionar Excel e confirmar download
-                self.helpers.click_element(*self.sel.EXCEL)
-                self.helpers.click_element(*self.sel.BAIXAR)
+                self._click_with_fallback(self.sel.EXCEL)
+                self._click_with_fallback(self.sel.BAIXAR)
         await self.log("OK Exportacao iniciada")
         await self.log("Aguardando 15s para download...")
         await asyncio.sleep(15)
@@ -252,7 +267,7 @@ class ItauOnshoreActions:
     async def logout(self) -> None:
         """Realiza logout do sistema."""
         await self.log("Iniciando logout...")
-        self.helpers.click_element(*self.sel.SAIR)
+        self._click_with_fallback(self.sel.SAIR)
         await self.log("Confirmando logout...")
-        self.helpers.click_element(*self.sel.SAIR_SIM)
+        self._click_with_fallback(self.sel.SAIR_SIM)
         await self.log(" Logout realizado")

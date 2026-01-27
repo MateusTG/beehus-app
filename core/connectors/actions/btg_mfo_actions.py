@@ -31,6 +31,26 @@ class BtgMfoActions:
         self.selectors = selectors
         self.log = log_func
 
+    def _click_with_fallback(self, locator) -> bool:
+        try:
+            el = self.driver.find_element(*locator)
+            if el.is_displayed() and el.is_enabled():
+                el.click()
+                return True
+        except Exception:
+            pass
+
+        try:
+            elements = self.driver.find_elements(*locator)
+            for el in elements:
+                if el.is_displayed():
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", el)
+                    self.driver.execute_script("arguments[0].click();", el)
+                    return True
+        except Exception:
+            pass
+        return False
+
     async def login_step(
         self,
         username: str,
@@ -168,14 +188,20 @@ class BtgMfoActions:
             access_button = correct_client_selection.find_element(
                 *self.selectors.ACCESS_BUTTON
             )
-            access_button.click()
+            try:
+                access_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", access_button)
             await asyncio.sleep(2)
 
             await self.log("Clicking operations button...")
             operation_button = self.helpers.wait_for_element(
                 *self.selectors.OPERATION_BUTTON
             )
-            operation_button.click()
+            try:
+                operation_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", operation_button)
             await asyncio.sleep(1)
 
             await self.log("Looking for WM reports feature...")
@@ -198,7 +224,10 @@ class BtgMfoActions:
                 }
 
             await self.log("Clicking WM reports button...")
-            correct_report_element.click()
+            try:
+                correct_report_element.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", correct_report_element)
 
             await self.log("Navigation successful")
             return {
@@ -227,28 +256,43 @@ class BtgMfoActions:
                 *self.selectors.CATEGORY_SELECT
             )
             await asyncio.sleep(1)
-            category_select.click()
+            try:
+                category_select.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", category_select)
 
             category_investment = self.helpers.wait_for_element(
                 *self.selectors.CATEGORY_INVESTMENT
             )
             await asyncio.sleep(1)
-            category_investment.click()
+            try:
+                category_investment.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", category_investment)
 
             await self.log("Selecting 'Investimentos (WM Externo) (D-1 e D0)' report...")
             report_select = self.helpers.wait_for_element(*self.selectors.REPORT_SELECT)
             await asyncio.sleep(1)
-            report_select.click()
+            try:
+                report_select.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", report_select)
 
             report_investment = self.helpers.wait_for_element(
                 *self.selectors.REPORT_INVESTMENT_WM
             )
             await asyncio.sleep(1)
-            report_investment.click()
+            try:
+                report_investment.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", report_investment)
 
             await self.log("Clicking filter button...")
             filter_button = self.helpers.wait_for_element(*self.selectors.FILTER_BUTTON)
-            filter_button.click()
+            try:
+                filter_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", filter_button)
 
             await self.log("Waiting for Power BI to load...")
             await asyncio.sleep(5)
@@ -298,7 +342,10 @@ class BtgMfoActions:
             positions_button = tile.find_element(*self.selectors.POSITIONS_BUTTON)
 
             await asyncio.sleep(0.5)
-            positions_button.click()
+            try:
+                positions_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", positions_button)
             await self.log("Navigated to positions page")
             await asyncio.sleep(5)
 
@@ -306,13 +353,19 @@ class BtgMfoActions:
             date_select = WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located(self.selectors.POSITIONS_DATE_SELECT)
             )
-            date_select.click()
+            try:
+                date_select.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", date_select)
             await asyncio.sleep(1)
 
             dzero_option = WebDriverWait(self.driver, 6).until(
                 EC.presence_of_element_located(self.selectors.POSITIONS_DZERO_OPTION)
             )
-            dzero_option.click()
+            try:
+                dzero_option.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", dzero_option)
             await self.log("D0 date selected")
             await asyncio.sleep(1)
 
@@ -320,29 +373,44 @@ class BtgMfoActions:
             positions_title = WebDriverWait(self.driver, 6).until(
                 EC.presence_of_element_located(self.selectors.POSITIONS_TITLE)
             )
-            positions_title.click()
+            try:
+                positions_title.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", positions_title)
 
             menu_button = WebDriverWait(self.driver, 12).until(
                 EC.presence_of_element_located(self.selectors.POSITIONS_MENU_BUTTON)
             )
-            menu_button.click()
+            try:
+                menu_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", menu_button)
 
             export_button = WebDriverWait(self.driver, 6).until(
                 EC.presence_of_element_located(self.selectors.EXPORT_DATA_BUTTON)
             )
-            export_button.click()
+            try:
+                export_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", export_button)
             await asyncio.sleep(0.5)
 
             await self.log("Downloading positions file...")
             download_button = WebDriverWait(self.driver, 6).until(
                 EC.presence_of_element_located(self.selectors.DOWNLOAD_BUTTON)
             )
-            download_button.click()
+            try:
+                download_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", download_button)
             await asyncio.sleep(3)
 
             self.driver.switch_to.default_content()
             filter_button = self.driver.find_element(*self.selectors.FILTER_BUTTON)
-            filter_button.click()
+            try:
+                filter_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", filter_button)
             await asyncio.sleep(5)
 
             await self.log("Positions report downloaded successfully")
@@ -396,7 +464,10 @@ class BtgMfoActions:
             transactions_button = tile.find_element(*self.selectors.POSITIONS_BUTTON)
 
             await asyncio.sleep(0.5)
-            transactions_button.click()
+            try:
+                transactions_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", transactions_button)
             await self.log("Navigated to transactions page")
             await asyncio.sleep(4)
 
@@ -404,29 +475,44 @@ class BtgMfoActions:
             transactions_title = WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located(self.selectors.TRANSACTIONS_TITLE)
             )
-            transactions_title.click()
+            try:
+                transactions_title.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", transactions_title)
 
             menu_button = WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located(self.selectors.TRANSACTIONS_MENU_BUTTON)
             )
-            menu_button.click()
+            try:
+                menu_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", menu_button)
 
             export_button = WebDriverWait(self.driver, 6).until(
                 EC.presence_of_element_located(self.selectors.EXPORT_DATA_BUTTON)
             )
-            export_button.click()
+            try:
+                export_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", export_button)
             await asyncio.sleep(0.5)
 
             await self.log("Downloading transactions file...")
             download_button = WebDriverWait(self.driver, 6).until(
                 EC.presence_of_element_located(self.selectors.DOWNLOAD_BUTTON)
             )
-            download_button.click()
+            try:
+                download_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", download_button)
             await asyncio.sleep(3)
 
             self.driver.switch_to.default_content()
             filter_button = self.driver.find_element(*self.selectors.FILTER_BUTTON)
-            filter_button.click()
+            try:
+                filter_button.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", filter_button)
 
             await self.log("Transactions report downloaded successfully")
             return {

@@ -11,11 +11,78 @@ from core.repositories import repo
 from core.models.mongo_models import Job, Run, Credential
 from core.db import init_db
 from core.security import decrypt_value
+from core.config import settings
 import asyncio
 import logging
 from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
+
+SELENIUM_SLOT_KEY = "selenium:slots"
+SELENIUM_SLOT_INIT_KEY = "selenium:slots:initialized"
+SELENIUM_MAX_SLOTS = max(
+    1,
+    settings.SELENIUM_MAX_SLOTS,
+    settings.SELENIUM_NODE_COUNT * settings.SELENIUM_NODE_MAX_SESSIONS,
+)
+
+
+async def _ensure_selenium_slots(redis_client) -> None:
+    """Ensure the Selenium slot pool exists in Redis."""
+    # Use SETNX to avoid re-initializing the slot pool
+    initialized = await redis_client.setnx(SELENIUM_SLOT_INIT_KEY, "1")
+    if initialized:
+        # Pre-fill the slot pool with N tokens
+        tokens = [f"slot-{i}" for i in range(SELENIUM_MAX_SLOTS)]
+        await redis_client.delete(SELENIUM_SLOT_KEY)
+        if tokens:
+            await redis_client.rpush(SELENIUM_SLOT_KEY, *tokens)
+
+
+async def _acquire_selenium_slot(run_id: str, timeout_seconds: int = 300) -> str | None:
+    """Acquire a Selenium slot token to limit concurrent sessions."""
+    try:
+        import redis.asyncio as redis
+    except Exception as e:
+        logger.error(f"Redis client not available for slot control: {e}")
+        return None
+
+    redis_client = redis.from_url(settings.REDIS_URL)
+    try:
+        await _ensure_selenium_slots(redis_client)
+        start = get_now()
+        while True:
+            result = await redis_client.brpop(SELENIUM_SLOT_KEY, timeout=5)
+            if result:
+                _, token = result
+                token_str = token.decode() if isinstance(token, (bytes, bytearray)) else str(token)
+                logger.info(f"✅ Acquired Selenium slot {token_str} for run {run_id}")
+                return token_str
+            waited = (get_now() - start).total_seconds()
+            if waited >= timeout_seconds:
+                logger.error(f"⏳ Timed out waiting for Selenium slot after {timeout_seconds}s")
+                return None
+            logger.info("⏳ Waiting for Selenium slot...")
+    finally:
+        await redis_client.close()
+
+
+async def _release_selenium_slot(token: str) -> None:
+    """Release a Selenium slot token back to the pool."""
+    if not token:
+        return
+    try:
+        import redis.asyncio as redis
+    except Exception as e:
+        logger.error(f"Redis client not available for slot release: {e}")
+        return
+
+    redis_client = redis.from_url(settings.REDIS_URL)
+    try:
+        await redis_client.lpush(SELENIUM_SLOT_KEY, token)
+        logger.info(f"🔓 Released Selenium slot {token}")
+    finally:
+        await redis_client.close()
 
 
 class DatabaseTask(Task):
@@ -23,6 +90,7 @@ class DatabaseTask(Task):
     _db_initialized = False
     
     def __call__(self, *args, **kwargs):
+        """Initialize the database once per worker process before running the task."""
         # Initialize Beanie once per worker process
         if not self._db_initialized:
             asyncio.run(init_db())
@@ -38,9 +106,8 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
     Main scraping task - executes a connector with Selenium.
     """
     async def _async_scrape():
+        """Async implementation of the scraping task."""
         await init_db()
-        from core.models.mongo_models import Run
-        from datetime import datetime
         
         try:
             # Get run document
@@ -72,6 +139,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     logger.warning(f"Credential {job.credential_id} not found for job {job_id}")
             
             async def log(msg):
+                """Write a message to logs and the run document."""
                 logger.info(msg)
                 if run:
                     # Atomic push to logs to avoid overwriting status
@@ -80,6 +148,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
 
             # Heartbeat loop
             async def heartbeat_loop():
+                """Keep the run updated while the task is active."""
                 while True:
                     try:
                         await asyncio.sleep(60)
@@ -114,9 +183,22 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             # - Else, Use Remote Selenium Grid (Port 7900)
             use_local = "jpmorgan" in connector_name.lower()
             
+            slot_token = None
+            if not use_local:
+                slot_token = await _acquire_selenium_slot(run_id)
+                if not slot_token:
+                    msg = "No Selenium slot available within timeout"
+                    await log(f"❌ {msg}")
+                    await repo.save_run_status(run_id, "failed", msg)
+                    heartbeat_task.cancel()
+                    return {"success": False, "error": msg}
+
             executor = SeleniumExecutor(use_local=use_local)
             executor.start()
             await log(f"🔌 Connected to Selenium Grid: {executor.driver.session_id}")
+            if run:
+                if executor.vnc_url:
+                    await run.update({"$set": {"vnc_url": executor.vnc_url}})
             
             try:
                 # Add context to params
@@ -155,6 +237,8 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     pass
                 
                 executor.stop()
+                if slot_token:
+                    await _release_selenium_slot(slot_token)
                 await log("🛑 Session ended")
                 
         except Exception as e:
@@ -180,7 +264,8 @@ def cleanup_stale_runs(self):
     - Fails 'queued' jobs older than > 1 hour
     """
     async def _cleanup():
-        from datetime import datetime, timedelta
+        """Async implementation of stale run cleanup."""
+        from datetime import timedelta
         
         # 1. Handle Zombie Running Jobs (No heartbeat)
         zombie_cutoff = get_now() - timedelta(minutes=5)
@@ -229,7 +314,8 @@ def cleanup_old_runs_task(self, days_old: int = 90):
         int: Number of runs deleted
     """
     async def _cleanup():
-        from datetime import datetime, timedelta
+        """Async implementation of old run cleanup."""
+        from datetime import timedelta
         cutoff = get_now() - timedelta(days=days_old)
         
         # Delete old runs
@@ -273,6 +359,7 @@ def scheduled_job_runner(self, job_id: str):
     Automatically creates a run and executes the job.
     """
     async def _run_scheduled():
+        """Async implementation of scheduled job runner."""
         await init_db()
         from core.models.mongo_models import Job, Run
         

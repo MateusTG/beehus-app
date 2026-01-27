@@ -3,9 +3,34 @@
 
 name: beehus-app
 
+x-chrome-node-env: &chrome-node-env
+  SE_EVENT_BUS_HOST: selenium-hub
+  SE_EVENT_BUS_PUBLISH_PORT: 4442
+  SE_EVENT_BUS_SUBSCRIBE_PORT: 4443
+  SE_START_XVFB: "true"
+  SE_START_VNC: "true"
+  SE_VNC_NO_PASSWORD: "1"
+  SE_NODE_MAX_SESSIONS: "1"
+  SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+
+x-chrome-node: &chrome-node
+  image: selenium/node-chrome:latest
+  shm_size: 2g
+  mem_limit: 2g
+  cpus: "1.0"
+  depends_on:
+    - selenium-hub
+  volumes:
+    - ${USERPROFILE}/Downloads:/downloads
+  networks:
+    - scrape-net
+  healthcheck:
+    test: ["CMD-SHELL", "curl -fsS http://localhost:5555/status || exit 1"]
+    interval: 20s
+    timeout: 5s
+    retries: 5
+
 services:
-
-
   mongo:
     image: mongo:6-jammy
     restart: always
@@ -48,18 +73,60 @@ services:
 
   # --- Infrastructure ---
 
-  # Selenium Grid (Restored for Standard Connectors)
-  selenium:
-    image: selenium/standalone-chrome:latest
-    container_name: beehus-app-selenium-1 # Fixed name to avoid orphans
-    shm_size: 2g
+  # Selenium Grid Hub
+  selenium-hub:
+    image: selenium/hub:latest
+    container_name: beehus-app-selenium-hub
     ports:
       - "4444:4444"
-      - "7900:7900" 
-    volumes:
-      - ${USERPROFILE}/Downloads:/downloads
     networks:
       - scrape-net
+
+  # Selenium Chrome Nodes (fixed 5 replicas)
+  chrome-node-1:
+    <<: *chrome-node
+    ports:
+      - "7902:7900"
+    environment:
+      <<: *chrome-node-env
+      SE_NODE_HOST: chrome-node-1
+      SE_NODE_PORT: "5555"
+
+  chrome-node-2:
+    <<: *chrome-node
+    ports:
+      - "7903:7900"
+    environment:
+      <<: *chrome-node-env
+      SE_NODE_HOST: chrome-node-2
+      SE_NODE_PORT: "5555"
+
+  chrome-node-3:
+    <<: *chrome-node
+    ports:
+      - "7904:7900"
+    environment:
+      <<: *chrome-node-env
+      SE_NODE_HOST: chrome-node-3
+      SE_NODE_PORT: "5555"
+
+  chrome-node-4:
+    <<: *chrome-node
+    ports:
+      - "7905:7900"
+    environment:
+      <<: *chrome-node-env
+      SE_NODE_HOST: chrome-node-4
+      SE_NODE_PORT: "5555"
+
+  chrome-node-5:
+    <<: *chrome-node
+    ports:
+      - "7906:7900"
+    environment:
+      <<: *chrome-node-env
+      SE_NODE_HOST: chrome-node-5
+      SE_NODE_PORT: "5555"
 
   # Celery Worker (Local Execution + Evasion)
   celery-worker:

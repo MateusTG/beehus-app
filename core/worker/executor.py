@@ -1,11 +1,15 @@
 import logging
 import os
+import re
+import time
+
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from core.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 class SeleniumExecutor:
     """
@@ -15,8 +19,11 @@ class SeleniumExecutor:
     - Remote: Uses Selenium Grid (for standard scraping)
     """
     def __init__(self, use_local: bool = False):
+        """Initialize executor state and mode."""
         self.driver = None
         self.node_id = None
+        self.node_uri = None
+        self.vnc_url = None
         self.use_local = use_local
 
     def start(self):
@@ -41,7 +48,7 @@ class SeleniumExecutor:
         # chrome_options.add_argument("--headless") # Disabled to allow VNC visibility
 
         prefs = {
-            "download.default_directory": "/home/seluser/Downloads",
+            "download.default_directory": "/downloads",
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True,
@@ -81,6 +88,7 @@ class SeleniumExecutor:
                 )
                 logger.info(f"✅ Created Local UC driver session: {self.driver.session_id}")
                 self.node_id = "LOCAL_WORKER_CONTAINER"
+                self.vnc_url = f"{settings.VNC_URL_BASE}:7901"
             except Exception as e:
                 logger.error(f"❌ Failed to start local driver: {e}")
                 raise
@@ -95,12 +103,49 @@ class SeleniumExecutor:
                 logger.info(f"✅ Created remote driver session: {self.driver.session_id}")
                 
                 # Try to get node info
-                self.node_id = self.get_node_info()
-                if self.node_id:
-                     logger.info(f"📍 Executing on node: {self.node_id}")
+                self._resolve_vnc_url()
+                if self.vnc_url:
+                    logger.info(f"📺 VNC: {self.vnc_url}")
+                else:
+                    logger.warning("⚠️ VNC URL not resolved for this session")
             except Exception as e:
-                 logger.error(f"❌ Failed to connect to Selenium Grid: {e}")
-                 raise
+                logger.error(f"❌ Failed to connect to Selenium Grid: {e}")
+                raise
+
+    def _resolve_vnc_url(self, retries: int = 5, delay_seconds: float = 1.0) -> None:
+        """Resolve and set the VNC URL for the current session."""
+        # First try capabilities (Grid may expose nodeId)
+        caps = getattr(self.driver, "capabilities", {}) or {}
+        node_id = caps.get("se:nodeId") or caps.get("nodeId")
+        if node_id:
+            self.node_id = node_id
+            self.vnc_url = self._build_vnc_url(self.node_id, self.node_uri)
+            if self.vnc_url:
+                return
+
+        # Retry Grid session endpoint while session is still live
+        for _ in range(retries):
+            self.node_id = self.get_node_info()
+            # Prefer nodeUri when available (more reliable for mapping VNC ports)
+            if self.node_uri:
+                self.vnc_url = self._build_vnc_url(self.node_id or "", self.node_uri)
+                if self.vnc_url:
+                    return
+            if self.node_id:
+                self.vnc_url = self._build_vnc_url(self.node_id, self.node_uri)
+                if self.vnc_url:
+                    return
+            time.sleep(delay_seconds)
+
+    def _build_vnc_url(self, node_id: str, node_uri: str | None) -> str | None:
+        """Build a VNC URL from the node ID or URI."""
+        candidates = [node_id or "", node_uri or ""]
+        for value in candidates:
+            match = re.search(r"chrome-node-(\d+)", value)
+            if match:
+                node_num = int(match.group(1))
+                return f"{settings.VNC_URL_BASE}:{7901 + node_num}"
+        return None
 
     def get_node_info(self):
         """Attempt to retrieve the node ID from Selenium Grid."""
@@ -110,8 +155,94 @@ class SeleniumExecutor:
             
             # Query Grid status endpoint
             grid_url = settings.SELENIUM_REMOTE_URL.replace('/wd/hub', '')
+            session_url = f"{grid_url}/se/grid/session/{self.driver.session_id}"
             status_url = f"{grid_url}/status"
+
+            # Prefer session lookup (more reliable for node mapping)
+            try:
+                response = requests.get(session_url, timeout=5)
+                if response.status_code == 200:
+                    data = response.json().get("value", {})
+                    node_id = data.get("nodeId")
+                    node_uri = data.get("nodeUri") or data.get("uri")
+                    logger.info(
+                        "Grid session lookup: status=200 nodeId=%s nodeUri=%s",
+                        node_id,
+                        node_uri,
+                    )
+                    if node_uri:
+                        self.node_uri = node_uri
+                    if node_id:
+                        return node_id
+                else:
+                    logger.warning(
+                        "Grid session lookup: status=%s body=%s",
+                        response.status_code,
+                        response.text[:500],
+                    )
+            except Exception as e:
+                logger.warning(f"Could not query session endpoint: {e}")
+
+            # Try alternate session endpoint (older grid versions)
+            try:
+                alt_session_url = f"{grid_url}/session/{self.driver.session_id}"
+                alt_res = requests.get(alt_session_url, timeout=5)
+                if alt_res.status_code == 200:
+                    data = alt_res.json().get("value", {})
+                    node_id = data.get("nodeId")
+                    node_uri = data.get("nodeUri") or data.get("uri")
+                    logger.info(
+                        "Grid alt session lookup: status=200 nodeId=%s nodeUri=%s",
+                        node_id,
+                        node_uri,
+                    )
+                    if node_uri:
+                        self.node_uri = node_uri
+                    if node_id:
+                        return node_id
+                else:
+                    logger.warning(
+                        "Grid alt session lookup: status=%s body=%s",
+                        alt_res.status_code,
+                        alt_res.text[:500],
+                    )
+            except Exception as e:
+                logger.warning(f"Could not query alternate session endpoint: {e}")
             
+            # Try GraphQL session lookup (Selenium 4)
+            try:
+                gql_url = f"{grid_url}/graphql"
+                query = {
+                    "query": (
+                        "query { "
+                        f"session(id: \"{self.driver.session_id}\") {{ id, nodeId, nodeUri }} "
+                        "}"
+                    )
+                }
+                gql_res = requests.post(gql_url, json=query, timeout=5)
+                if gql_res.status_code == 200:
+                    gql_data = gql_res.json()
+                    session = (gql_data.get("data") or {}).get("session") or {}
+                    node_id = session.get("nodeId")
+                    node_uri = session.get("nodeUri")
+                    logger.info(
+                        "Grid GraphQL session lookup: status=200 nodeId=%s nodeUri=%s",
+                        node_id,
+                        node_uri,
+                    )
+                    if node_uri:
+                        self.node_uri = node_uri
+                    if node_id:
+                        return node_id
+                else:
+                    logger.warning(
+                        "Grid GraphQL session lookup: status=%s body=%s",
+                        gql_res.status_code,
+                        gql_res.text[:500],
+                    )
+            except Exception as e:
+                logger.warning(f"Could not query GraphQL session: {e}")
+
             response = requests.get(status_url, timeout=5)
             if response.status_code == 200:
                 data = response.json()
@@ -119,13 +250,15 @@ class SeleniumExecutor:
                 nodes = data.get('value', {}).get('nodes', [])
                 for node in nodes:
                     node_id = node.get('nodeId') or node.get('id')
+                    node_uri = node.get('uri')
                     if node_id:
+                        self.node_uri = node_uri
                         return node_id
             
-            return "selenium-node-1"
+            return None
         except Exception as e:
             logger.warning(f"Could not determine node ID: {e}")
-            return "selenium-node-unknown"
+            return None
 
     def stop(self):
         """Quits the webdriver session."""

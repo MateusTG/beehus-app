@@ -44,6 +44,24 @@ class BtgOffshoreActions:
                 return True
         return False
 
+    def _click_with_fallback(self, locator) -> bool:
+        try:
+            self.helpers.click_element(*locator)
+            return True
+        except Exception:
+            pass
+
+        try:
+            elements = self.driver.find_elements(*locator)
+            for el in elements:
+                if el.is_displayed():
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", el)
+                    self.driver.execute_script("arguments[0].click();", el)
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _find_first_visible(self, locators):
         for loc in locators:
             elements = self.driver.find_elements(*loc)
@@ -70,9 +88,28 @@ class BtgOffshoreActions:
             raise TimeoutException(timeout_msg) from exc
 
     def _overlay_visible(self) -> bool:
-        return self._is_visible(self.sel.MODAL_OVERLAY)
+        return self._is_visible(self.sel.MODAL_OVERLAY) or self._is_visible(self.sel.GENERIC_OVERLAY)
 
-    def _wait_overlay_gone(self, timeout_seconds: int = 10) -> bool:
+    def _overlay_state(self) -> dict:
+        return {
+            "modal": self._is_visible(self.sel.MODAL_OVERLAY),
+            "generic": self._is_visible(self.sel.GENERIC_OVERLAY),
+        }
+
+    def _remove_generic_overlay_js(self) -> bool:
+        try:
+            removed = self.driver.execute_script(
+                """
+                const overlays = document.querySelectorAll('div.overlay');
+                overlays.forEach(o => o.remove());
+                return overlays.length;
+                """
+            )
+            return bool(removed)
+        except Exception:
+            return False
+
+    def _wait_overlay_gone(self, timeout_seconds: int = 15) -> bool:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             if not self._overlay_visible():
@@ -80,7 +117,7 @@ class BtgOffshoreActions:
             time.sleep(0.25)
         return not self._overlay_visible()
 
-    async def dismiss_modal_overlay(self, context: str = "", wait_seconds: float = 0) -> None:
+    async def dismiss_modal_overlay(self, context: str = "", wait_seconds: int = 15) -> None:
         if wait_seconds > 0:
             deadline = time.time() + wait_seconds
             while time.time() < deadline and not self._overlay_visible():
@@ -95,12 +132,36 @@ class BtgOffshoreActions:
             if not self._overlay_visible():
                 return
 
-            if self._click_if_visible(self.sel.DONT_SHOW_AGAIN):
-                await self.log("OK Dismissed modal (Don't show again)")
+            overlay_state = self._overlay_state()
+            if overlay_state.get("generic") and not overlay_state.get("modal"):
+                await self.log("INFO Generic overlay visible, waiting to clear before close")
+                self._wait_overlay_gone()
+                if self._overlay_visible():
+                    if self._remove_generic_overlay_js():
+                        await self.log("WARN Generic overlay removed via JS fallback")
+                    return
+
+            if overlay_state.get("modal"):
+                overlays = self.driver.find_elements(*self.sel.MODAL_OVERLAY)
+                for ov in overlays:
+                    try:
+                        btns = ov.find_elements(*self.sel.MODAL_CLOSE_BUTTON)
+                        for btn in btns:
+                            if btn.is_displayed() and btn.is_enabled():
+                                btn.click()
+                                await self.log("OK Dismissed modal (Close button in overlay)")
+                                break
+                    except Exception:
+                        continue
+                if not self._overlay_visible():
+                    return
+
+            if self._click_if_visible(self.sel.MODAL_CLOSE_BUTTON):
+                await self.log("OK Dismissed modal (Close button)")
             elif self._click_if_visible(self.sel.MODAL_CLOSE):
                 await self.log("OK Dismissed modal (Close icon/btn)")
-            elif self._click_if_visible(self.sel.MODAL_CLOSE_BUTTON):
-                await self.log("OK Dismissed modal (Close button)")
+            elif self._click_if_visible(self.sel.DONT_SHOW_AGAIN):
+                await self.log("OK Dismissed modal (Don't show again)")
             elif self._click_if_visible(self.sel.MODAL_SKIP):
                 await self.log("OK Dismissed modal (Skip/Close text)")
 
@@ -111,8 +172,21 @@ class BtgOffshoreActions:
                 await self.log("OK Modal overlay gone after close")
                 return
 
+        if self._overlay_visible() and self._is_visible(self.sel.GENERIC_OVERLAY):
+            if self._remove_generic_overlay_js():
+                await self.log("WARN Generic overlay removed via JS fallback")
+
         if self._overlay_visible():
             overlays = self.driver.find_elements(*self.sel.MODAL_OVERLAY)
+            if overlays:
+                try:
+                    self.driver.execute_script("arguments[0].click();", overlays[-1])
+                    time.sleep(1)
+                except Exception:
+                    pass
+
+        if self._overlay_visible():
+            overlays = self.driver.find_elements(*self.sel.GENERIC_OVERLAY)
             if overlays:
                 try:
                     self.driver.execute_script("arguments[0].click();", overlays[-1])
@@ -251,7 +325,10 @@ class BtgOffshoreActions:
 
     async def submit_access(self) -> None:
         access_btn = self._wait_enabled(self.sel.ACCESS_BTN)
-        access_btn.click()
+        try:
+            access_btn.click()
+        except Exception:
+            self.driver.execute_script("arguments[0].click();", access_btn)
         await self.log("OK Access submitted")
         await self.dismiss_modal_overlay("post-access", wait_seconds=6)
 
@@ -259,48 +336,48 @@ class BtgOffshoreActions:
 
     async def open_start_date_input(self) -> None:
         await self.dismiss_modal_overlay("before start date input")
-        self.helpers.click_element(*self.sel.DATE_INPUT)
+        self._click_with_fallback(self.sel.DATE_INPUT)
         await self.log("OK Start date input opened")
 
     async def select_calendar_date(self, date_str: str) -> None:
         day_cell = (By.XPATH, f"//td[@title='{date_str}']")
-        self.helpers.click_element(*day_cell)
+        self._click_with_fallback(day_cell)
         await self.log(f"OK Date selected: {date_str}")
 
     async def open_check_all_anchor(self) -> None:
-        if self._click_if_visible(self.sel.CHECK_ALL_ANCHOR):
+        if self._click_with_fallback(self.sel.CHECK_ALL_ANCHOR):
             await self.log("OK Check all opened")
         else:
             await self.log("INFO Check all already open or not visible")
 
     async def open_export_options(self) -> None:
-        self.helpers.click_element(*self.sel.EXPORT_OPTIONS_BTN)
+        self._click_with_fallback(self.sel.EXPORT_OPTIONS_BTN)
         await self.log("OK Export options opened")
 
     async def select_export_all(self) -> None:
-        self.helpers.click_element(*self.sel.EXPORT_ALL_OPTION)
+        self._click_with_fallback(self.sel.EXPORT_ALL_OPTION)
         await self.log("OK Export all selected")
 
     async def open_portfolio(self) -> None:
         if not self._is_visible(self.sel.SIDEBAR_PORTFOLIO):
             self._click_if_visible(self.sel.SIDEBAR_TOGGLE)
-        self.helpers.click_element(*self.sel.SIDEBAR_PORTFOLIO)
+        self._click_with_fallback(self.sel.SIDEBAR_PORTFOLIO)
         await self.log("OK Portfolio opened")
 
     async def click_portfolio_check_all(self) -> None:
-        self.helpers.click_element(*self.sel.PORTFOLIO_CHECK_ALL)
+        self._click_with_fallback(self.sel.PORTFOLIO_CHECK_ALL)
         await self.log("OK Portfolio check all selected")
 
     async def open_filters(self) -> None:
-        self.helpers.click_element(*self.sel.FILTERS_BTN)
+        self._click_with_fallback(self.sel.FILTERS_BTN)
         await self.log("OK Filters opened")
 
     async def open_time_period(self) -> None:
-        self.helpers.click_element(*self.sel.TIME_PERIOD)
+        self._click_with_fallback(self.sel.TIME_PERIOD)
         await self.log("OK Time Period opened")
 
     async def select_custom_period(self) -> None:
-        self.helpers.click_element(*self.sel.CUSTOM_PERIOD)
+        self._click_with_fallback(self.sel.CUSTOM_PERIOD)
         await self.log("OK Custom period selected")
 
     async def set_custom_period_dates(self, date_str: str) -> None:
@@ -311,20 +388,20 @@ class BtgOffshoreActions:
             date_inputs[1].click()
             await self.select_calendar_date(date_str)
         else:
-            self.helpers.click_element(*self.sel.CUSTOM_DATE_INPUTS)
+            self._click_with_fallback(self.sel.CUSTOM_DATE_INPUTS)
             await self.select_calendar_date(date_str)
         await self.log(f"OK Custom period dates set: {date_str}")
 
     async def click_filter(self) -> None:
-        self.helpers.click_element(*self.sel.FILTER_BTN)
+        self._click_with_fallback(self.sel.FILTER_BTN)
         await self.log("OK Filter applied")
 
     async def click_export(self) -> None:
-        self.helpers.click_element(*self.sel.EXPORT_BTN)
+        self._click_with_fallback(self.sel.EXPORT_BTN)
         await self.log("OK Export requested")
 
     async def click_download(self) -> None:
-        self.helpers.click_element(*self.sel.DOWNLOAD_BTN)
+        self._click_with_fallback(self.sel.DOWNLOAD_BTN)
         await self.log("OK Download started")
 
     def _type_human(self, el, value: str) -> None:
@@ -349,11 +426,11 @@ class BtgOffshoreActions:
         return False
 
     async def click_change_custody(self) -> None:
-        self.helpers.click_element(*self.sel.CHANGE_CUSTODY)
+        self._click_with_fallback(self.sel.CHANGE_CUSTODY)
         await self.log("OK Change custody clicked")
 
     async def select_cayman_country(self) -> None:
-        self.helpers.click_element(*self.sel.COUNTRY_CAYMAN)
+        self._click_with_fallback(self.sel.COUNTRY_CAYMAN)
         await self.log("OK Cayman Islands selected")
 
     # ========== LOGOUT ==========
@@ -364,7 +441,7 @@ class BtgOffshoreActions:
             await self.log("OK Signed out")
 
     async def click_sign_out(self) -> None:
-        self.helpers.click_element(*self.sel.SIGN_OUT)
+        self._click_with_fallback(self.sel.SIGN_OUT)
         await self.log("OK Sign out clicked")
 
     # ========== EXPORT METHODS ==========

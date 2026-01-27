@@ -127,6 +127,7 @@ class Run(Document):
     celery_task_id: Optional[str] = None  # For task cancellation
     error_summary: Optional[str] = None
     logs: List[str] = []
+    vnc_url: Optional[str] = None
     report_date: Optional[str] = None  # Position Date (DD/MM/YYYY)
     history_date: Optional[str] = None  # History Date (DD/MM/YYYY)
     started_at: Optional[datetime] = None

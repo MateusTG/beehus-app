@@ -40,6 +40,7 @@ class RunResponse(BaseModel):
     finished_at: Optional[datetime]
     created_at: datetime
     error_summary: Optional[str]
+    vnc_url: Optional[str] = None
     logs: List[str] = []
     
     class Config:

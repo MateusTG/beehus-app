@@ -9,6 +9,7 @@ interface RunData {
     logs: string[];
     error_summary?: string;
     connector?: string;
+    vnc_url?: string;
 }
 
 export default function LiveView() {
@@ -90,10 +91,25 @@ export default function LiveView() {
   );
 
   const isLocalEvasion = run?.connector?.includes('jpmorgan');
-  const vncPort = isLocalEvasion ? '7901' : '7900'; // 7901=Worker(Local), 7900=Grid(Remote)
   const baseUrl = import.meta.env.VITE_VNC_URL_BASE || 'http://localhost';
-  const vncUrl = `${baseUrl}:${vncPort}/?autoconnect=true&resize=scale&password=${import.meta.env.VITE_VNC_PASSWORD || 'secret'}`;
-  const fullVncUrl = import.meta.env.VITE_VNC_URL || vncUrl;
+  const vncPassword = import.meta.env.VITE_VNC_PASSWORD || 'secret';
+
+  const fallbackVncPort = isLocalEvasion ? '7901' : null; // Local worker only
+  const fallbackVncUrl = fallbackVncPort
+      ? `${baseUrl}:${fallbackVncPort}/?autoconnect=true&resize=scale&password=${vncPassword}`
+      : null;
+
+  const runVncUrl = run?.vnc_url ? `${run.vnc_url}/?autoconnect=true&resize=scale&password=${vncPassword}` : null;
+  const vncUrl = runVncUrl || fallbackVncUrl;
+  const fullVncUrl = import.meta.env.VITE_VNC_URL || vncUrl || undefined;
+
+  const vncPort = (() => {
+    try {
+      return new URL(vncUrl).port || fallbackVncPort || '';
+    } catch {
+      return fallbackVncPort || '';
+    }
+  })();
 
   return (
     <div className="flex flex-col h-screen bg-black/50 backdrop-blur-3xl">
@@ -123,7 +139,12 @@ export default function LiveView() {
                     href={fullVncUrl} 
                     target="_blank" 
                     rel="noreferrer"
-                    className="text-xs text-brand-500 hover:underline"
+                    className={`text-xs ${fullVncUrl ? 'text-brand-500 hover:underline' : 'text-slate-500 cursor-not-allowed'}`}
+                    onClick={(event) => {
+                      if (!fullVncUrl) {
+                        event.preventDefault();
+                      }
+                    }}
                 >
                     Open Full VNC
                 </a>
@@ -192,12 +213,18 @@ export default function LiveView() {
                     return (
                         <>
                         <div className="w-full h-full bg-slate-900 rounded-lg overflow-hidden border border-slate-700 shadow-2xl relative">
+                        {vncUrl ? (
                             <iframe 
                                 src={vncUrl} 
                                 className="w-full h-full border-0"
                                 title={isLocalEvasion ? "Local Worker VNC" : "Selenium Grid VNC"}
                                 allowFullScreen
                             />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
+                                VNC indisponível: aguardando URL do node
+                            </div>
+                        )}
                             
                             {/* Overlay if not running */}
                             {run?.status !== 'running' && run?.status !== 'queued' && (
@@ -211,7 +238,7 @@ export default function LiveView() {
                          </div>
 
                          <p className="mt-2 text-xs text-slate-500">
-                            Viewing: <span className="text-brand-400 font-bold">{isLocalEvasion ? 'Worker Display (Local Evasion)' : 'Selenium Grid (Standard)'}</span> • Port {vncPort}
+                            Viewing: <span className="text-brand-400 font-bold">{isLocalEvasion ? 'Worker Display (Local Evasion)' : 'Selenium Grid (Standard)'}</span>{vncPort ? ` • Port ${vncPort}` : ''}
                          </p>
                          </>
                     );
