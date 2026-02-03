@@ -82,7 +82,7 @@ services:
     networks:
       - scrape-net
 
-  # Selenium Chrome Nodes (fixed 5 replicas)
+  # Selenium Chrome Nodes (2 replicas for concurrent execution)
   chrome-node-1:
     <<: *chrome-node
     ports:
@@ -101,40 +101,13 @@ services:
       SE_NODE_HOST: chrome-node-2
       SE_NODE_PORT: "5555"
 
-  chrome-node-3:
-    <<: *chrome-node
-    ports:
-      - "7904:7900"
-    environment:
-      <<: *chrome-node-env
-      SE_NODE_HOST: chrome-node-3
-      SE_NODE_PORT: "5555"
-
-  chrome-node-4:
-    <<: *chrome-node
-    ports:
-      - "7905:7900"
-    environment:
-      <<: *chrome-node-env
-      SE_NODE_HOST: chrome-node-4
-      SE_NODE_PORT: "5555"
-
-  chrome-node-5:
-    <<: *chrome-node
-    ports:
-      - "7906:7900"
-    environment:
-      <<: *chrome-node-env
-      SE_NODE_HOST: chrome-node-5
-      SE_NODE_PORT: "5555"
-
   # Celery Worker (Local Execution + Evasion)
   celery-worker:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    # command: celery -A django_config worker --loglevel=info --concurrency=4
-    command: bash /app/scripts/start_worker_vnc.sh
+    # Reduced concurrency to 1 for memory optimization (jobs are I/O bound)
+    command: celery -A core.celery_app worker --concurrency=1 --loglevel=info
     restart: unless-stopped
     ports:
       - "5901:5900"
@@ -171,19 +144,21 @@ services:
     networks:
       - scrape-net
 
-  # Flower (Celery monitoring)
-  flower:
-    build: .
-    command: celery -A django_config flower --port=5555
-    restart: unless-stopped
-    ports:
-      - "5555:5555"
-    env_file:
-      - .env
-    depends_on:
-      - celery-worker
-    networks:
-      - scrape-net
+  # Flower (Celery monitoring) - DISABLED for memory optimization
+  # Uncomment only when debugging. Use CLI monitoring instead:
+  # docker exec beehus-app-celery-worker-1 celery -A core.celery_app inspect active
+  # flower:
+  #   build: .
+  #   command: celery -A core.celery_app flower --port=5555
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5555:5555"
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     - celery-worker
+  #   networks:
+  #     - scrape-net
 
   app-console:
     build: .

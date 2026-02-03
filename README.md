@@ -77,10 +77,9 @@ Below is a breakdown of each container and its role in the platform:
 | Component | Service Name | Role & Description |
 |:---|:---|:---|
 | **API** | `app-console` | **REST API (FastAPI)**<br>Main entrypoint. Manages Workspaces, Jobs, and triggers Runs. Dispatches tasks to RabbitMQ. |
-| **Worker** | `celery-worker` | **Task Executor**<br>Consumes tasks from RabbitMQ. Initializes Selenium WebDriver and executes the scraping logic using `core/connectors`. Persists results to MongoDB. |
+| **Worker** | `celery-worker` | **Task Executor**<br>Consumes tasks from RabbitMQ. Initializes Selenium WebDriver and executes the scraping logic using `core/connectors`. Persists results to MongoDB. Concurrency: 1 (optimized for I/O-bound jobs). |
 | **Scheduler** | `celery-beat` | **Cron Scheduler**<br>Triggers periodic tasks using a custom **MongoScheduler**, allowing dynamic schedule management via the database. |
-| **Monitor** | `flower` | **Dashboards**<br>Web UI for monitoring Celery tasks, worker health, and queue statistics. |
-| **Browser** | `selenium` | **Selenium Standalone**<br>Runs Chrome/Firefox browsers in a headless environment. The worker connects here to drive the browser remotely. |
+| **Browser** | `selenium` | **Selenium Standalone**<br>Runs Chrome browsers in a headless environment. The worker connects here to drive the browser remotely. 2 nodes for concurrent execution. |
 | **Broker** | `rabbitmq` | **Message Broker**<br>Handles communication between API and Workers. Stores task queues (`default`, `celery`). |
 | **DB** | `mongo` | **Database (NoSQL)**<br>Stores all application data: job configurations, run status, and scraped payloads. |
 | **Cache** | `redis` | **Cache & Result Backend**<br>Used by Celery for result storage and coordination. |
@@ -108,7 +107,6 @@ Below is a breakdown of each container and its role in the platform:
 |:---|:---|
 | **Frontend Dashboard** | [http://localhost:5173](http://localhost:5173) |
 | **API Documentation** | [http://localhost:8000/docs](http://localhost:8000/docs) |
-| **Flower (Task Monitor)** | [http://localhost:5555](http://localhost:5555) |
 | **Selenium Grid UI** | [http://localhost:4444](http://localhost:4444) |
 | **RabbitMQ Admin** | [http://localhost:15672](http://localhost:15672) |
 
@@ -121,15 +119,48 @@ Access [http://localhost:5173](http://localhost:5173) to:
 - **Execution History:** View detailed logs of past runs via the "Runs" page.
 - **Collapsible Sidebar:** Toggle the sidebar to maximize screen real estate.
 
-### 2. Monitor Tasks (Flower)
-Access [http://localhost:5555](http://localhost:5555) to see:
-- Active / Processed Tasks
-- Worker Health
-- Task Args and Results
+### 2. Monitor Tasks (CLI)
+
+> **Note**: Flower web UI has been disabled to save ~300MB RAM. Use CLI monitoring instead:
+
+**Windows (PowerShell)**:
+```powershell
+# Show active tasks
+.\scripts\monitor_celery.ps1 active
+
+# Show worker statistics
+.\scripts\monitor_celery.ps1 stats
+
+# Show all available commands
+.\scripts\monitor_celery.ps1 help
+```
+
+**Linux/Mac (Bash)**:
+```bash
+# Show active tasks
+./scripts/monitor_celery.sh active
+
+# Show worker statistics
+./scripts/monitor_celery.sh stats
+```
+
+**Direct Docker Commands**:
+```bash
+# Active tasks
+docker exec beehus-app-celery-worker-1 celery -A core.celery_app inspect active
+
+# Worker stats
+docker exec beehus-app-celery-worker-1 celery -A core.celery_app inspect stats
+
+# Ping workers
+docker exec beehus-app-celery-worker-1 celery -A core.celery_app inspect ping
+```
+
+> **To re-enable Flower**: Uncomment the `flower` service in `docker-compose.yml` and restart with `docker compose up -d`
 
 ### 2. Watch Browser Activity (Selenium)
 Access [http://localhost:4444](http://localhost:4444) to:
-- See active Chrome Slots (3 available).
+- See active Chrome Slots (2 available).
 - View live sessions (Sessions tab -> Click on camera icon if VNC is enabled, or just see the session list).
 - Debug failed sessions.
 
