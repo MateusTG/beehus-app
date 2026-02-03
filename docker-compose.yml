@@ -130,7 +130,9 @@ services:
 
   # Celery Worker (Local Execution + Evasion)
   celery-worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
     # command: celery -A django_config worker --loglevel=info --concurrency=4
     command: bash /app/scripts/start_worker_vnc.sh
     restart: unless-stopped

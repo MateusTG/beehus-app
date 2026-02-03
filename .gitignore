@@ -20,3 +20,12 @@ Thumbs.db
 
 # Docker
 # docker-compose.override.yml
+
+# AI
+ai/
+.claude.md
+.codex.md
+.llm.md
+# Artifacts
+artifacts/*.log
+artifacts/*.png
