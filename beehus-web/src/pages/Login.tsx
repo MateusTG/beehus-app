@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 export default function Login() {
@@ -25,8 +25,8 @@ export default function Login() {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
       
-      const { access_token } = response.data;
-      login(access_token);
+      const { access_token, refresh_token } = response.data;
+      await login(access_token, refresh_token);
       navigate('/');
     } catch (err: any) {
       console.error(err);
@@ -75,6 +75,12 @@ export default function Login() {
                 Enter Console
             </button>
         </form>
+
+        <div className="mt-4 text-center">
+            <Link to="/forgot-password" className="text-sm text-brand-500 hover:text-brand-400">
+                Forgot password?
+            </Link>
+        </div>
         
         <div className="mt-6 text-center">
             <p className="text-xs text-slate-500">Protected by Beehus Guard™ v2.0</p>

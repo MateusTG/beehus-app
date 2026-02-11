@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
-  const { logout } = useAuth();
+  const { logout, isAdmin } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const isActive = (path: string) => 
@@ -47,10 +47,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 {!isCollapsed && <span>Runs</span>}
             </Link>
+          <Link to="/downloads" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/downloads')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Downloads" : ""}>
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            {!isCollapsed && <span>Downloads</span>}
+          </Link>
           <Link to="/credentials" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/credentials')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Credential Vault" : ""}>
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
             {!isCollapsed && <span>Credentials</span>}
           </Link>
+          {isAdmin && (
+            <Link to="/users" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/users')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Users" : ""}>
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a4 4 0 00-5-3.87M7 20H2v-2a4 4 0 015-3.87m10-3.13a4 4 0 11-8 0 4 4 0 018 0zM9 7a4 4 0 108 0 4 4 0 00-8 0z"></path></svg>
+              {!isCollapsed && <span>Users</span>}
+            </Link>
+          )}
         </nav>
         
         <div className="p-4 border-t border-dark-border/50 overflow-hidden">

@@ -117,6 +117,7 @@ Access [http://localhost:5173](http://localhost:5173) to:
 - **Monitor Live Executions:** View active and queued runs with real-time status updates.
 - **Manage Jobs/Workspaces:** Create and configure scraping jobs.
 - **Execution History:** View detailed logs of past runs via the "Runs" page.
+- **Downloads & Reports:** Access downloaded and processed files via the "Downloads" page.
 - **Collapsible Sidebar:** Toggle the sidebar to maximize screen real estate.
 
 ### 2. Monitor Tasks (CLI)
