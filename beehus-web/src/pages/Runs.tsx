@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Layout from '../components/Layout';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
@@ -19,13 +19,86 @@ export default function Runs() {
     const [runs, setRuns] = useState<Run[]>([]);
     const [loading, setLoading] = useState(true);
     const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
+    const [wsConnected, setWsConnected] = useState(false);
+    const [wsConnecting, setWsConnecting] = useState(false);
+    const [wsError, setWsError] = useState<string | null>(null);
     const { showToast } = useToast();
+    const wsRef = useRef<WebSocket | null>(null);
+    const retryCountRef = useRef(0);
+    const reconnectTimeoutRef = useRef<number | null>(null);
+
+    const connectWebSocket = useCallback(() => {
+        const maxRetries = 5;
+        const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace('http', 'ws') + '/ws/runs';
+
+        if (wsRef.current) {
+            wsRef.current.onclose = null;
+            wsRef.current.close();
+        }
+
+        if (reconnectTimeoutRef.current) {
+            window.clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+        }
+
+        setWsConnecting(true);
+        setWsError(null);
+
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+            console.log('✅ Connected to Real-time Run Updates');
+            retryCountRef.current = 0;
+            setWsConnected(true);
+            setWsConnecting(false);
+            setWsError(null);
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                setRuns(prevRuns => {
+                    return prevRuns.map(run => {
+                       if (run.run_id === data.run_id) {
+                           return { 
+                               ...run, 
+                               status: data.status,
+                               ...(data.node && { node: data.node })
+                           };
+                       }
+                       return run;
+                    });
+                });
+            } catch (e) {
+                console.error('Failed to parse WS message:', e);
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('🔴 WebSocket Disconnected');
+            setWsConnected(false);
+            setWsConnecting(false);
+
+            if (retryCountRef.current < maxRetries) {
+                const timeout = Math.min(1000 * (2 ** retryCountRef.current), 10000);
+                reconnectTimeoutRef.current = window.setTimeout(() => {
+                    console.log(`♻️ Reconnecting in ${timeout}ms...`);
+                    retryCountRef.current += 1;
+                    connectWebSocket();
+                }, timeout);
+            }
+        };
+
+        ws.onerror = (err) => {
+            console.error('WebSocket Error:', err);
+            setWsError('WebSocket error');
+            ws.close();
+        };
+    }, []);
 
     useEffect(() => {
         let isMounted = true;
-        let ws: WebSocket | null = null;
-        let retryCount = 0;
-        const maxRetries = 5;
 
         // Fetch initial state
         const fetchRuns = async () => {
@@ -43,71 +116,27 @@ export default function Runs() {
             }
         };
 
-        const connectWebSocket = () => {
-            const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace('http', 'ws') + '/ws/runs';
-            ws = new WebSocket(wsUrl);
-
-            ws.onopen = () => {
-                console.log('✅ Connected to Real-time Run Updates');
-                retryCount = 0; // Reset retries on success
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    // Update state if run exists
-                    setRuns(prevRuns => {
-                        return prevRuns.map(run => {
-                           if (run.run_id === data.run_id) {
-                               return { 
-                                   ...run, 
-                                   status: data.status,
-                                   // Update node if provided
-                                   ...(data.node && { node: data.node })
-                               };
-                           }
-                           
-                           // If it's a new run creation event (not yet in list), we could add it
-                           // For now, let's just update existing ones to be safe
-                           return run;
-                        });
-                    });
-                } catch (e) {
-                    console.error('Failed to parse WS message:', e);
-                }
-            };
-            
-            ws.onclose = () => {
-                console.log('🔴 WebSocket Disconnected');
-                // Simple exponential backoff for reconnection
-                if (isMounted && retryCount < maxRetries) {
-                    const timeout = Math.min(1000 * (2 ** retryCount), 10000);
-                    setTimeout(() => {
-                        console.log(`♻️ Reconnecting in ${timeout}ms...`);
-                        retryCount++;
-                        connectWebSocket();
-                    }, timeout);
-                }
-            };
-
-            ws.onerror = (err) => {
-                console.error('WebSocket Error:', err);
-                ws?.close();
-            };
-        };
-
         fetchRuns();
         connectWebSocket();
 
         return () => {
             isMounted = false;
             // Clean close
-            if (ws) {
-                ws.onclose = null; // Prevent reconnection attempt on unmount
-                ws.close();
+            if (wsRef.current) {
+                wsRef.current.onclose = null;
+                wsRef.current.close();
+            }
+            if (reconnectTimeoutRef.current) {
+                window.clearTimeout(reconnectTimeoutRef.current);
+                reconnectTimeoutRef.current = null;
             }
         };
-    }, []);
+    }, [connectWebSocket]);
+
+    const handleWsRetry = () => {
+        retryCountRef.current = 0;
+        connectWebSocket();
+    };
 
     const getStatusBadge = (status: string) => {
         const badges = {
@@ -145,9 +174,26 @@ export default function Runs() {
     return (
         <Layout>
             <div className="p-8 max-w-7xl mx-auto space-y-8">
-                <header>
-                    <h2 className="text-2xl font-bold text-white">Execution History</h2>
-                    <p className="text-slate-400">View all job execution logs</p>
+                <header className="flex items-start justify-between gap-4">
+                    <div>
+                        <h2 className="text-2xl font-bold text-white">Execution History</h2>
+                        <p className="text-slate-400">View all job execution logs</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${wsConnected ? 'bg-green-500/20 text-green-300 border-green-500/30' : 'bg-red-500/20 text-red-300 border-red-500/30'}`}>
+                            <span className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`}></span>
+                            {wsConnecting ? 'WS connecting…' : wsConnected ? 'WS connected' : 'WS disconnected'}
+                        </span>
+                        {!wsConnected && (
+                            <button
+                                onClick={handleWsRetry}
+                                className="text-xs font-medium text-brand-300 hover:text-brand-200 border border-brand-500/30 rounded-full px-3 py-1"
+                                title={wsError || 'Retry WebSocket'}
+                            >
+                                Retry
+                            </button>
+                        )}
+                    </div>
                 </header>
 
                 <div className="glass rounded-xl overflow-hidden border border-white/5">

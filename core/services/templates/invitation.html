@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Beehus Invitation</title>
+  </head>
+  <body style="font-family: Arial, sans-serif; color: #1f2937;">
+    <p>Hello {{ full_name }},</p>
+    <p>You have been invited to the Beehus Platform by {{ invited_by }}.</p>
+    <p>
+      Click the link below to accept your invitation:
+      <br />
+      <a href="{{ invitation_link }}">{{ invitation_link }}</a>
+    </p>
+    <p>This invitation expires in 48 hours.</p>
+  </body>
+</html>

@@ -28,5 +28,4 @@ ai/
 .codex.md
 .llm.md
 # Artifacts
-artifacts/*.log
-artifacts/*.png
+artifacts/

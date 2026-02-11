@@ -6,7 +6,7 @@ These models replace the SQLAlchemy models for MongoDB-only architecture.
 from beanie import Document, Indexed
 from datetime import datetime
 from typing import Optional, List
-from pydantic import Field
+from pydantic import Field, BaseModel
 import uuid
 from core.utils.date_utils import get_now
 
@@ -23,6 +23,13 @@ class User(Document):
     full_name: Optional[str] = None
     role: str = "user"  # admin, user
     created_at: datetime = Field(default_factory=get_now)
+    is_active: bool = True
+    invited_by: Optional[str] = None
+    invitation_token: Optional[str] = None
+    invitation_expires_at: Optional[datetime] = None
+    last_login: Optional[datetime] = None
+    password_reset_token: Optional[str] = None
+    password_reset_expires_at: Optional[datetime] = None
     
     class Settings:
         name = "users"
@@ -117,10 +124,20 @@ class Job(Document):
         name = "jobs"
 
 
+class RunFile(BaseModel):
+    """Metadata for a downloadable run file."""
+    file_type: str
+    filename: str
+    path: str
+    size_bytes: Optional[int] = None
+    status: str = "ready"
+
+
 class Run(Document):
     """Individual execution of a job"""
     id: str = Field(default_factory=generate_uuid)
     job_id: Indexed(str)
+    job_name: Optional[str] = None
     connector: Optional[str] = None  # Connector name for display
     status: str = "queued"  # queued, running, success, failed
     attempt: int = 1
@@ -134,6 +151,7 @@ class Run(Document):
     finished_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=get_now)
     updated_at: Optional[datetime] = Field(default_factory=get_now)
+    files: List[RunFile] = Field(default_factory=list)
     
     class Settings:
         name = "runs"

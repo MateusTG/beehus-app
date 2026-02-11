@@ -17,6 +17,7 @@ from core.db import init_db, close_db
 from core.config import settings
 from core.models.mongo_models import Workspace, InboxIntegration, OtpRule, Job, Run, OtpAudit
 from core.tasks import scrape_task
+from core.services.user_service import ensure_admin_exists
 from django_config import celery_app
 from core.schemas.otp import (
     WorkspaceCreate, WorkspaceResponse,
@@ -77,6 +78,7 @@ async def lifespan(app: FastAPI):
     """Initialize DB and start background tasks."""
     # Startup
     await init_db()
+    await ensure_admin_exists()
     redis_task = asyncio.create_task(redis_listener())
     
     yield
@@ -111,9 +113,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.console.routers import auth, credentials
+from app.console.routers import auth, credentials, users, downloads
 app.include_router(auth.router)
 app.include_router(credentials.router)
+app.include_router(users.router)
+app.include_router(downloads.router)
 
 
 # ============================================================================

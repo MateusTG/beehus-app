@@ -6,7 +6,11 @@ Replaces the custom aio_pika worker implementation.
 from celery import Task
 from django_config import celery_app
 from core.worker.executor import SeleniumExecutor
+from core.services.file_manager import FileManager
 from core.connectors.registry import ConnectorRegistry
+from datetime import datetime
+import os
+import shutil
 from core.repositories import repo
 from core.models.mongo_models import Job, Run, Credential
 from core.db import init_db
@@ -108,6 +112,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
     async def _async_scrape():
         """Async implementation of the scraping task."""
         await init_db()
+        run_download_dir = None
         
         try:
             # Get run document
@@ -118,6 +123,11 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             
             # Fetch job to check for credentials
             job = await Job.get(job_id)
+            download_root = os.getenv("DOWNLOADS_DIR", "/downloads")
+            run_download_dir = os.path.join(download_root, run_id)
+            os.makedirs(run_download_dir, exist_ok=True)
+            if run and job and job.name:
+                await run.update({"$set": {"job_name": job.name}})
             
             # Prepare execution params
             execution_params = params.copy()
@@ -193,7 +203,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     heartbeat_task.cancel()
                     return {"success": False, "error": msg}
 
-            executor = SeleniumExecutor(use_local=use_local)
+            executor = SeleniumExecutor(use_local=use_local, download_dir=run_download_dir)
             executor.start()
             await log(f"🔌 Connected to Selenium Grid: {executor.driver.session_id}")
             if run:
@@ -222,6 +232,72 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                             result.data.get('url', 'unknown'), 
                             str(result.data)
                         )
+                    
+                    # Capture and process downloaded files
+                    await log("📁 Checking for downloaded files...")
+                    try:
+                        # Capture files from downloads
+                        original_paths = FileManager.capture_downloads(
+                            run_id,
+                            pattern="*",
+                            source_dir=run_download_dir,
+                        )
+                        
+                        if original_paths:
+                            # Extract metadata for processed naming
+                            job = await Job.get(job_id)
+                            metadata = {
+                                'bank': connector_name.replace('conn_', '').replace('_', ' ').title(),
+                                'account': params_with_context.get('conta', params_with_context.get('account', '0000')),
+                                'date': datetime.now().strftime('%d%m%Y')
+                            }
+                            
+                            files_metadata = []
+                            for idx, original_path in enumerate(original_paths, start=1):
+                                suffix = str(idx) if len(original_paths) > 1 else ""
+
+                                # Rename original file to standardized output name
+                                renamed_original = FileManager.rename_file(
+                                    original_path,
+                                    metadata,
+                                    suffix=suffix
+                                ) or original_path
+
+                                # Process file to standardized output name
+                                processed_path = FileManager.process_file(
+                                    renamed_original,
+                                    run_id,
+                                    metadata,
+                                    suffix=suffix
+                                )
+                                
+                                files_metadata.append({
+                                    'file_type': 'original',
+                                    'filename': os.path.basename(renamed_original),
+                                    'path': FileManager.to_artifact_relative(renamed_original),
+                                    'size_bytes': FileManager.get_file_size(renamed_original),
+                                    'status': 'ready'
+                                })
+                                
+                                if processed_path:
+                                    files_metadata.append({
+                                        'file_type': 'processed',
+                                        'filename': os.path.basename(processed_path),
+                                        'path': FileManager.to_artifact_relative(processed_path),
+                                        'size_bytes': FileManager.get_file_size(processed_path),
+                                        'status': 'ready'
+                                    })
+                            
+                            if files_metadata:
+                                await run.update({"$set": {"files": files_metadata}})
+                                await log(f"✅ Files captured: {len(files_metadata)} file(s)")
+                        else:
+                            await log("ℹ️  No files downloaded")
+                    
+                    except Exception as file_error:
+                        await log(f"⚠️  File processing error: {file_error}")
+                        # Don't fail the job if file processing fails
+                    
                     await log(f"✅ Scrape successful")
                 else:
                     await repo.save_run_status(run_id, "failed", result.error)
@@ -245,6 +321,13 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             logger.exception(f"❌ Scrape task exception: {e}")
             await repo.save_run_status(run_id, "failed", str(e))
             raise
+        finally:
+            if run_download_dir and os.path.isdir(run_download_dir):
+                try:
+                    shutil.rmtree(run_download_dir, ignore_errors=True)
+                    logger.info(f"🧹 Removed run download dir: {run_download_dir}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Could not remove run download dir {run_download_dir}: {cleanup_error}")
     
     # Use existing event loop or create new one if needed
     try:
@@ -370,7 +453,13 @@ def scheduled_job_runner(self, job_id: str):
             return
         
         # Create run
-        run = Run(job_id=job_id, connector=job.connector, status="queued", logs=["[System] Scheduled execution"])
+        run = Run(
+            job_id=job_id,
+            job_name=job.name,
+            connector=job.connector,
+            status="queued",
+            logs=["[System] Scheduled execution"],
+        )
         await run.save()
         
         logger.info(f"📅 Scheduled job triggered: {job_id}, run: {run.id}")
