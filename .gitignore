@@ -26,6 +26,10 @@ ai/
 .claude.md
 .codex.md
 .llm.md
+
 # Artifacts
 artifacts/*.log
 artifacts/*.png
+
+# Scripts
+scripts/create_admin_user.py

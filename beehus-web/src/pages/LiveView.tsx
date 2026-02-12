@@ -105,6 +105,9 @@ export default function LiveView() {
 
   const vncPort = (() => {
     try {
+      if (!vncUrl) {
+        return fallbackVncPort || '';
+      }
       return new URL(vncUrl).port || fallbackVncPort || '';
     } catch {
       return fallbackVncPort || '';
